@@ -18,7 +18,7 @@ This project uses the `Qwen/Qwen3-0.6B` model via the provided `llm_sdk`. To ens
 3. The SDK will automatically handle fetching the required model artifacts when you run the main script. Alternatively, you might need to run the specific SDK preparation script if provided, or simply run the main application:
 
 ```bash
-py -m uv run python -m src --functions_definition data/input/functions_definition.json --input data/input/function_calling_tests.json --output data/output/function_calls.json
+python3 -m uv run python -m src --functions_definition data/input/functions_definition.json --input data/input/function_calling_tests.json --output data/output/function_calls.json
 ```
 
 ### Makefile Targets
@@ -57,5 +57,5 @@ Basic tests were carried out on common prompts with the provided input files. Ad
 ```bash
 make run
 # or
-py -m uv run python -m src --input custom_prompts.json --output result.json
+python3 -m uv run python -m src --input custom_prompts.json --output result.json
 ```
