@@ -1,11 +1,14 @@
 import argparse
 import numpy as np
 from llm_sdk import Small_LLM_Model
+from color import print_colored, p_col_arg
 
 
 def test_model() -> None:
-    print(
-        "Initializing model (saving/loading to HF hub might take a moment)...")
+    print_colored(
+        "Initializing model (saving/loading to HF hub might take a moment)...",
+        "blue"
+    )
     model = Small_LLM_Model()
 
     while True:
@@ -32,6 +35,23 @@ def test_model() -> None:
         print()  # Add a newline after generation finishes
 
 
+def check_files_exist(*file_paths: str) -> bool:
+    import os
+    missing_files: list[str] = [
+        file for file in file_paths if not os.path.isfile(file)]
+    if missing_files:
+        # create folder and empty files if they don't exist
+        for file in missing_files:
+            os.makedirs(os.path.dirname(file), exist_ok=True)
+            with open(file, 'w', encoding='utf-8') as f:
+                f.write("{}" if file.endswith('.json') else "")
+        print_colored(
+            f"Created missing files: {', '.join(missing_files)}",
+            "yellow"
+        )
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Call Me Maybe - Function Calling with LLMs"
@@ -54,18 +74,23 @@ def main() -> None:
         default="data/output/function_calls.json",
         help="Path to output file"
     )
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
-    # Process args...
-    print(f"Reading from {args.input}")
-    print(f"Function definitions from {args.functions_definition}")
-    print(f"Writing to {args.output}")
     try:
-        test_model()
-    except KeyboardInterrupt:
-        print("\nGeneration interrupted by user.")
+        check_files_exist(args.functions_definition, args.input, args.output)
+        p_col_arg("Input file: ", args.input, "blue")
+        p_col_arg("Function definitions: ", args.functions_definition, "blue")
+        p_col_arg("Output file: ", args.output, "blue")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print_colored(f"Error checking/creating files: {e}", "red")
+        return
+    # try:
+    #     test_model()
+    # except KeyboardInterrupt:
+    #     print_colored("\nGeneration interrupted by user.", "red")
+    # except Exception as e:
+    #     print_colored(f"An error occurred: {e}", "red")
+
 
 if __name__ == "__main__":
     main()
