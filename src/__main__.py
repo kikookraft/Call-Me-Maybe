@@ -1,43 +1,80 @@
 import argparse
 import sys
+import time
 import numpy as np
 from typing import Any, cast
-from llm_sdk import Small_LLM_Model
-from color import print_colored, p_col_arg
-from json_formater import (
+from .color import print_colored, p_col_arg
+from .json_formater import (
     read_json, validate_input_prompt, validate_function_definition
 )
 
+# because loading the model is reaaalllyyy long
+before: float = time.time()
+print_colored("Loading model, please wait...", "yellow")
+from llm_sdk import Small_LLM_Model
+print_colored(
+    f"Model loaded in {(time.time() - before):.2f}",
+    "green")
 
-def test_model() -> None:
-    print_colored(
-        "Initializing model (saving/loading to HF hub might take a moment)...",
-        "blue"
-    )
-    model = Small_LLM_Model()
 
-    while True:
-        prompt: str = input("Enter a prompt to generate from: ")
+class LLM_Model:
+    """Contain context, llm and other things"""
 
+    def __init__(
+            self,
+            funcdef: list[dict[str, Any]],
+            input_dict: list[dict[str, Any]]) -> None:
+        self.model = Small_LLM_Model()
+        self.funcdef: list[dict[str, Any]] = funcdef
+        self.input_dict: list[dict[str, Any]] = input_dict
+
+    def generate(self, prompt: str, max_tokens: int = 75) -> str:
+        """Generate response token by token."""
         # Encode prompt to token IDs
-        tokenized_inputs = model.encode(prompt)[0].tolist()
+        tokenized_inputs: list[int] = self.model.encode(prompt)[0].tolist()
         print("Generating response token-by-token...")
 
+        output_tokens: list[int] = []
+
         # generates tokens
-        for _ in range(75):
+        for _ in range(max_tokens):
             # Ask model for logits of the next token, given the current context
-            logits: list[float] = model.get_logits_from_input_ids(tokenized_inputs)
+            logits: list[float] = self.model.get_logits_from_input_ids(
+                tokenized_inputs
+            )
 
             # Pick the token with the highest probability (greedy decoding)
             next_token_id = int(np.argmax(logits))
 
             # Decode just the new token and print it immediately
-            print(model.decode([next_token_id]), end="", flush=True)
+            print(self.model.decode([next_token_id]), end="", flush=True)
 
             # Append to our running context
             tokenized_inputs.append(next_token_id)
+            output_tokens.append(next_token_id)
 
         print()  # Add a newline after generation finishes
+        return self.model.decode(output_tokens)
+
+
+def execute_function(name: str, parameters: dict[str, Any]) -> Any:
+    """Execute a custom function by name with provided parameters."""
+    if name == "fn_add_numbers":
+        return parameters.get("a", 0) + parameters.get("b", 0)
+    elif name == "fn_subtract_numbers":
+        return parameters.get("a", 0) - parameters.get("b", 0)
+    elif name == "fn_multiply_numbers":
+        return parameters.get("a", 0) * parameters.get("b", 0)
+    elif name == "fn_divide_numbers":
+        b = parameters.get("b", 1)
+        return parameters.get("a", 0) / b if b != 0 else float('inf')
+    elif name == "fn_greet":
+        return f"Hello, {parameters.get('name', 'User')}!"
+    elif name == "fn_reverse_string":
+        s = parameters.get("s", "")
+        return str(s)[::-1]
+    else:
+        raise ValueError(f"Unknown function: {name}")
 
 
 def check_files_exist(*file_paths: str) -> bool:
@@ -132,12 +169,20 @@ def main() -> None:
     except Exception as e:
         print_colored(f"Error checking/creating files: {e}", "red")
         return
-    # try:
-    #     test_model()
-    # except KeyboardInterrupt:
-    #     print_colored("\nGeneration interrupted by user.", "red")
-    # except Exception as e:
-    #     print_colored(f"An error occurred: {e}", "red")
+
+    try:
+        func_defs: list[dict[str, Any]] = read_json(args.functions_definition)
+        inputs: list[dict[str, Any]] = read_json(args.input)
+        llm = LLM_Model(func_defs, inputs)
+
+        while True:
+            prompt: str = input("Enter a prompt to generate from: ")
+            llm.generate(prompt)
+
+    except KeyboardInterrupt:
+        print_colored("\nGeneration interrupted by user.", "red")
+    except Exception as e:
+        print_colored(f"An error occurred: {e}", "red")
 
 
 if __name__ == "__main__":
