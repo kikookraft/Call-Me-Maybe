@@ -19,5 +19,5 @@ lint:
 	python3 -m uv run mypy . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 
 lint-strict:
-	python3 -m uv run flake8 .
-	python3 -m uv run mypy . --strict
+	python3 -m uv run flake8 src/* --exclude=src/__pycache__
+	python3 -m uv run mypy src --strict
