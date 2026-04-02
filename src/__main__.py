@@ -1,7 +1,12 @@
 import argparse
+import sys
 import numpy as np
+from typing import Any, cast
 from llm_sdk import Small_LLM_Model
 from color import print_colored, p_col_arg
+from json_formater import (
+    read_json, validate_input_prompt, validate_function_definition
+)
 
 
 def test_model() -> None:
@@ -12,7 +17,7 @@ def test_model() -> None:
     model = Small_LLM_Model()
 
     while True:
-        prompt = input("Enter a prompt to generate from: ")
+        prompt: str = input("Enter a prompt to generate from: ")
 
         # Encode prompt to token IDs
         tokenized_inputs = model.encode(prompt)[0].tolist()
@@ -21,7 +26,7 @@ def test_model() -> None:
         # generates tokens
         for _ in range(75):
             # Ask model for logits of the next token, given the current context
-            logits = model.get_logits_from_input_ids(tokenized_inputs)
+            logits: list[float] = model.get_logits_from_input_ids(tokenized_inputs)
 
             # Pick the token with the highest probability (greedy decoding)
             next_token_id = int(np.argmax(logits))
@@ -36,6 +41,9 @@ def test_model() -> None:
 
 
 def check_files_exist(*file_paths: str) -> bool:
+    """Verify for each files passed as argument if they exist
+    if not create the path and the file
+    if this fails, open raise an error"""
     import os
     missing_files: list[str] = [
         file for file in file_paths if not os.path.isfile(file)]
@@ -49,6 +57,44 @@ def check_files_exist(*file_paths: str) -> bool:
             f"Created missing files: {', '.join(missing_files)}",
             "yellow"
         )
+    return True
+
+
+def check_inputs_validity(func_def_path: str, input_path: str) -> bool:
+    """Take the functions definition file and the input file path
+    This function verify """
+    try:
+        func_defs: Any = read_json(func_def_path)
+        inputs: Any = read_json(input_path)
+    except Exception as e:
+        print_colored(f"Error reading JSON files: {e}", "red")
+        return False
+
+    if not isinstance(func_defs, list):
+        print_colored("Function definitions must be a list.", "red")
+        return False
+
+    if not isinstance(inputs, list):
+        print_colored("Input prompts must be a list.", "red")
+        return False
+
+    for func in cast(list[Any], func_defs):
+        if not isinstance(func, dict):
+            print_colored(f"Invalid function definition: {func}", "red")
+            sys.exit(1)
+        if not validate_function_definition(cast(dict[str, Any], func)):
+            print_colored(f"Invalid function definition: {func}", "red")
+            sys.exit(1)
+
+    for item in cast(list[Any], inputs):
+        if not isinstance(item, dict):
+            print_colored(f"Invalid input prompt: {item}", "red")
+            sys.exit(1)
+        if not validate_input_prompt(cast(dict[str, Any], item)):
+            print_colored(f"Invalid input prompt: {item}", "red")
+            sys.exit(1)
+
+    print_colored("All inputs and function definitions are valid.", "green")
     return True
 
 
@@ -78,6 +124,8 @@ def main() -> None:
 
     try:
         check_files_exist(args.functions_definition, args.input, args.output)
+        if not check_inputs_validity(args.functions_definition, args.input):
+            return
         p_col_arg("Input file: ", args.input, "blue")
         p_col_arg("Function definitions: ", args.functions_definition, "blue")
         p_col_arg("Output file: ", args.output, "blue")
