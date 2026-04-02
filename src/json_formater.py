@@ -3,35 +3,66 @@ from typing import Any, cast
 
 
 def read_file(file_path: str) -> str:
+    """read from file"""
     with open(file_path, 'r', encoding='utf-8') as f:
         return f.read()
 
 
 def write_file(file_path: str, content: str) -> None:
+    """write to file"""
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
 
 def read_json(file_path: str) -> list[dict[str, Any]]:
-    return json.loads(read_file(file_path))
+    """read file as json"""
+    # because mypy dont like the Any output: make a cast to the specified type
+    return cast(list[dict[str, Any]], json.loads(read_file(file_path)))
 
 
 def write_json(file_path: str, data: list[dict[str, Any]]) -> None:
+    """write json to file"""
     write_file(file_path, json.dumps(data))
 
 
 def append_json(file_path: str, data: dict[str, Any]) -> None:
+    """add a dict to a json file"""
     existing_data: list[dict[str, Any]] = read_json(file_path)
     existing_data.append(data)
     write_json(file_path, existing_data)
 
 
-def validate_prompt(prompt: dict[str, Any]) -> bool:
-    required_keys: set[str] = {"prompt", "description", "parameters"}
-    if not all(key in prompt for key in required_keys):
+def validate_input_prompt(prompt: dict[str, Any]) -> bool:
+    """Validate that the input prompt has the correct structure."""
+    if "prompt" not in prompt or not isinstance(prompt["prompt"], str):
         return False
-    if not isinstance(prompt["parameters"], dict):
+    return True
+
+
+def validate_function_definition(funcdef: dict[str, Any]) -> bool:
+    """Validate that the function definition has the correct structure."""
+    required_keys: set[str] = {"name", "description", "parameters", "returns"}
+    if not all(key in funcdef for key in required_keys):
         return False
+    if not isinstance(funcdef["name"], str):
+        return False
+    if not isinstance(funcdef["description"], str):
+        return False
+
+    parameters_dict = funcdef.get("parameters", {})
+    if not isinstance(parameters_dict, dict):
+        return False
+
+    returns_dict = funcdef.get("returns", {})
+    if not isinstance(returns_dict, dict) or "type" not in returns_dict:
+        return False
+
+    for _, param_spec in cast(dict[str, Any], parameters_dict).items():
+        if not isinstance(param_spec, dict) or "type" not in param_spec:
+            return False
+        if not isinstance(param_spec["type"], str):
+            return False
+
     return True
 
 
