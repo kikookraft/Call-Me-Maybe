@@ -38,12 +38,18 @@ class LLM_Model:
 
         # generates tokens
         for _ in range(max_tokens):
-            # Ask model for logits of the next token, given the current context
+            # Ask model for logits...
             logits: list[float] = self.model.get_logits_from_input_ids(
                 tokenized_inputs
             )
 
-            # Pick the token with the highest probability (greedy decoding)
+            # Let's say token ID 42 is a word we NEVER want to generate
+            logits[42] = -float('inf')
+
+            # Let's say token ID 100 is a word we strongly encourage
+            logits[100] += 10.0
+
+            # Pick the token with the highest probability
             next_token_id = int(np.argmax(logits))
 
             # Decode just the new token and print it immediately
@@ -183,6 +189,7 @@ def main() -> None:
         print_colored("\nGeneration interrupted by user.", "red")
     except Exception as e:
         print_colored(f"An error occurred: {e}", "red")
+    print_colored("Exiting program. Please wait...", "yellow")
 
 
 if __name__ == "__main__":
