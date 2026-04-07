@@ -10,6 +10,7 @@ class Color:
     MAGENTA = "\033[95m"
     CYAN = "\033[96m"
     WHITE = "\033[97m"
+    GRAY = "\033[90m"
     RESET = "\033[0m"
     SECOND_BEST = "\033[136m"  # Light magenta for second best tokens"
     THIRD_BEST = "\033[214m"  # Light magenta for third best tokens"
@@ -45,14 +46,9 @@ class Color:
         return f"{Color.CYAN}{text}{Color.RESET}"
     
     @staticmethod
-    def second_best(text: str) -> str:
+    def gray(text: str) -> str:
         """Wrap text in color codes."""
-        return f"{Color.SECOND_BEST}{text}{Color.RESET}"
-    
-    @staticmethod
-    def third_best(text: str) -> str:
-        """Wrap text in color codes."""
-        return f"{Color.THIRD_BEST}{text}{Color.RESET}"
+        return f"{Color.GRAY}{text}{Color.RESET}"
 
 
 def print_colored(text: str, color: str) -> None:

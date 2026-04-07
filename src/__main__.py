@@ -8,6 +8,9 @@ from .output import print_colored, p_col_arg, Terminal
 from .json_formater import (
     read_json, validate_input_prompt, validate_function_definition
 )
+from .inputs import (
+    execute_function, check_files_exist, check_inputs_validity
+)
 
 # because loading the model is reaaalllyyy long
 before: float = time.time()
@@ -25,15 +28,63 @@ class LLM_Model:
             self,
             funcdef: list[dict[str, Any]],
             input_dict: list[dict[str, Any]]) -> None:
-        self.model = Small_LLM_Model()
+        self.model: Any = Small_LLM_Model()
         self.funcdef: list[dict[str, Any]] = funcdef
         self.input_dict: list[dict[str, Any]] = input_dict
         self.last_rendered_lines: int = 0
+        self.pre_prompt: str = self.build_pre_prompt()
 
-    def generate(self, prompt: str, max_tokens: int = 75) -> str:
+    def build_pre_prompt(self) -> str:
+        """Build the pre-prompt with the function definitions."""
+        pre_prompt: str = "You are a helpful assistant that can call functions to answer questions.\n\n"
+        pre_prompt += "Reply in short and concise answers, and if you need to call a function, use the following format:\n\n"
+        pre_prompt += "```\n"
+        pre_prompt += "{\n"
+        pre_prompt += '  "function_call": {\n'
+        pre_prompt += '    "name": "function_name",\n'
+        pre_prompt += '    "parameters": {\n'
+        pre_prompt += '      "param1": "value1",\n'
+        pre_prompt += '      "param2": "value2"\n'
+        pre_prompt += '    }\n'
+        pre_prompt += '  }\n'
+        pre_prompt += "}\n"
+        pre_prompt += "```\n\n"
+        pre_prompt += "Here are the available functions:\n"
+        for func in self.funcdef:
+            func_name: str = str(func.get("name", "unknown_function"))
+            func_desc: str = str(func.get("description", "No description provided."))
+            pre_prompt += f"- {func_name}: {func_desc}\n"
+
+            parameters: Any = func.get("parameters", {})
+            pre_prompt += "  Parameters:\n"
+            if isinstance(parameters, dict) and parameters:
+                for param_name, param_spec in cast(dict[str, Any], parameters).items():
+                    if isinstance(param_spec, dict):
+                        param_spec_dict: dict[str, Any] = cast(dict[str, Any], param_spec)
+                        param_type: str = str(param_spec_dict.get("type", "any"))
+                        param_desc: str = str(param_spec_dict.get("description", "No description provided."))
+                    else:
+                        param_type = "any"
+                        param_desc = "No description provided."
+                    pre_prompt += f"    - {param_name} ({param_type}): {param_desc}\n"
+            else:
+                pre_prompt += "    - none\n"
+
+            returns: Any = func.get("returns", {})
+            if isinstance(returns, dict):
+                returns_dict: dict[str, Any] = cast(dict[str, Any], returns)
+                return_type: str = str(returns_dict.get("type", "any"))
+                return_desc: str = str(returns_dict.get("description", ""))
+            else:
+                return_type = "any"
+                return_desc = ""
+            pre_prompt += f"  Returns: {return_type} - {return_desc}\n\n"
+        return pre_prompt
+
+    def generate(self, prompt: str, max_tokens: int = 10) -> str:
         """Generate response token by token."""
         # Encode prompt to token IDs
-        tokenized_inputs: list[int] = self.model.encode(prompt)[0].tolist()
+        tokenized_inputs: list[int] = self.model.encode(self.pre_prompt + prompt)[0].tolist()
         print_colored("Generating response token-by-token...", "yellow")
         self.last_rendered_lines = 0
 
@@ -74,7 +125,7 @@ class LLM_Model:
         """Get the top k most weighted tokens from the last generation step."""
         # Return token IDs sorted from highest to lowest logit.
         top_k_indices = np.argpartition(logits, -k)[-k:]
-        sorted_top_k_indices = top_k_indices[np.argsort(np.array(logits)[top_k_indices])[::-1]]
+        sorted_top_k_indices: Any = top_k_indices[np.argsort(np.array(logits)[top_k_indices])[::-1]]
         return sorted_top_k_indices.tolist()
     
     def tttext(self, tokens: list[int]) -> str:
@@ -88,10 +139,10 @@ class LLM_Model:
         except OSError:
             cols = 80
 
-        ansi_re = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+        ansi_re: re.Pattern[str] = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
         total: int = 0
         for raw_line in text.split("\n"):
-            visible_len = len(ansi_re.sub("", raw_line))
+            visible_len: int = len(ansi_re.sub("", raw_line))
             total += max(1, (visible_len + cols - 1) // cols)
         return total
 
@@ -134,90 +185,11 @@ class LLM_Model:
         print("\nGenerated Response:")
         print_colored(generated_text, "green")
         print("\n2nd most weighted tokens:")
-        print_colored(second_text, "second_best")
+        print_colored(second_text, "gray")
         print("\n3rd most weighted tokens:")
-        print_colored(third_text, "third_best")
+        print_colored(third_text, "gray")
 
         self.last_rendered_lines = self._count_rendered_lines(panel_text)
-
-
-
-def execute_function(name: str, parameters: dict[str, Any]) -> Any:
-    """Execute a custom function by name with provided parameters."""
-    if name == "fn_add_numbers":
-        return parameters.get("a", 0) + parameters.get("b", 0)
-    elif name == "fn_subtract_numbers":
-        return parameters.get("a", 0) - parameters.get("b", 0)
-    elif name == "fn_multiply_numbers":
-        return parameters.get("a", 0) * parameters.get("b", 0)
-    elif name == "fn_divide_numbers":
-        b = parameters.get("b", 1)
-        return parameters.get("a", 0) / b if b != 0 else float('inf')
-    elif name == "fn_greet":
-        return f"Hello, {parameters.get('name', 'User')}!"
-    elif name == "fn_reverse_string":
-        s = parameters.get("s", "")
-        return str(s)[::-1]
-    else:
-        raise ValueError(f"Unknown function: {name}")
-
-
-def check_files_exist(*file_paths: str) -> bool:
-    """Verify for each files passed as argument if they exist
-    if not create the path and the file
-    if this fails, open raise an error"""
-    import os
-    missing_files: list[str] = [
-        file for file in file_paths if not os.path.isfile(file)]
-    if missing_files:
-        # create folder and empty files if they don't exist
-        for file in missing_files:
-            os.makedirs(os.path.dirname(file), exist_ok=True)
-            with open(file, 'w', encoding='utf-8') as f:
-                f.write("{}" if file.endswith('.json') else "")
-        print_colored(
-            f"Created missing files: {', '.join(missing_files)}",
-            "yellow"
-        )
-    return True
-
-
-def check_inputs_validity(func_def_path: str, input_path: str) -> bool:
-    """Take the functions definition file and the input file path
-    This function verify """
-    try:
-        func_defs: Any = read_json(func_def_path)
-        inputs: Any = read_json(input_path)
-    except Exception as e:
-        print_colored(f"Error reading JSON files: {e}", "red")
-        return False
-
-    if not isinstance(func_defs, list):
-        print_colored("Function definitions must be a list.", "red")
-        return False
-
-    if not isinstance(inputs, list):
-        print_colored("Input prompts must be a list.", "red")
-        return False
-
-    for func in cast(list[Any], func_defs):
-        if not isinstance(func, dict):
-            print_colored(f"Invalid function definition: {func}", "red")
-            sys.exit(1)
-        if not validate_function_definition(cast(dict[str, Any], func)):
-            print_colored(f"Invalid function definition: {func}", "red")
-            sys.exit(1)
-
-    for item in cast(list[Any], inputs):
-        if not isinstance(item, dict):
-            print_colored(f"Invalid input prompt: {item}", "red")
-            sys.exit(1)
-        if not validate_input_prompt(cast(dict[str, Any], item)):
-            print_colored(f"Invalid input prompt: {item}", "red")
-            sys.exit(1)
-
-    print_colored("All inputs and function definitions are valid.", "green")
-    return True
 
 
 def main() -> None:
@@ -260,10 +232,12 @@ def main() -> None:
         inputs: list[dict[str, Any]] = read_json(args.input)
         llm = LLM_Model(func_defs, inputs)
 
-        while True:
-            print_colored("\nEnter a prompt to generate from", "magenta")
-            prompt: str = input("> ")
-            llm.generate(prompt)
+        for entry in inputs:
+            prompt: str = str(entry.get("prompt", ""))
+            # print_colored("\nEnter a prompt to generate from", "magenta")
+            # prompt: str = input("> ")
+            llm.generate(prompt, max_tokens=100)
+            print("\n" + "-" * 50 + "\n")
 
     except KeyboardInterrupt:
         print_colored("\nGeneration interrupted by user.", "red")

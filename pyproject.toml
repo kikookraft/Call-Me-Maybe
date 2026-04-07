@@ -8,6 +8,7 @@ dependencies = [
     "numpy",
     "pydantic",
     "llm_sdk",
+    "flake8>=7.3.0",
 ]
 
 [tool.uv.sources]
