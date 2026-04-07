@@ -85,12 +85,9 @@ class LLM_Model:
         """Generate response token by token."""
         # Encode prompt to token IDs
         tokenized_inputs: list[int] = self.model.encode(self.pre_prompt + prompt)[0].tolist()
-        print_colored("Generating response token-by-token...", "yellow")
         self.last_rendered_lines = 0
 
         output_tokens: list[int] = []
-        second_best_tokens: list[int] = []
-        third_best_tokens: list[int] = []
 
         # generates tokens
         for _ in range(max_tokens):
@@ -99,27 +96,19 @@ class LLM_Model:
                 tokenized_inputs
             )
 
-            # Keep 2nd and 3rd best token streams across generation steps.
-            top_three: list[int] = self.get_top_k_tokens(3, logits)
-            next_token_id: int = top_three[0]
-            second_best_tokens.append(top_three[1])
-            third_best_tokens.append(top_three[2])
+            next_token_id: int = self.get_top_k_tokens(1, logits)[0]
 
             output_tokens.append(next_token_id)
 
             # Append to our running context
             tokenized_inputs.append(next_token_id)
 
-            # print the generated response so far + the rest
-            self.format_gen(
-                generated=output_tokens,
-                second_best_tokens=second_best_tokens,
-                third_best_tokens=third_best_tokens,
-                prompt=prompt
-            )
+            # Render live output with prompt and token progression.
+            self.format_gen(prompt=prompt, generated=output_tokens, max_tokens=max_tokens)
 
+        generated_text: str = self.model.decode(output_tokens)
         print()
-        return self.model.decode(output_tokens)
+        return generated_text
     
     def get_top_k_tokens(self, k: int, logits: list[float]) -> list[int]:
         """Get the top k most weighted tokens from the last generation step."""
@@ -146,49 +135,27 @@ class LLM_Model:
             total += max(1, (visible_len + cols - 1) // cols)
         return total
 
-    def format_gen(
-            self,
-            generated: list[int],
-            second_best_tokens: list[int],
-            third_best_tokens: list[int],
-            prompt: str) -> None:
-        """Format the generated response for better readability.
-        clear terminal each time, this function is called each time
-        a new token is generated, and reprint everything:
-        - print the prompt in blue 
-        - the generated response in green
-        - the setence with all 2nd most weighted tokens in yellow
-        - the setence with all 3rd most weighted tokens in yellow
-         """
+    def format_gen(self, prompt: str, generated: list[int], max_tokens: int) -> None:
+        """Render prompt, token progression, and current response in-place."""
         if self.last_rendered_lines > 0:
             Terminal.up(self.last_rendered_lines)
 
         Terminal.clear_to_end()
 
+        token_count: int = len(generated)
+        completion: float = (token_count / max_tokens) * 100 if max_tokens > 0 else 0.0
         generated_text: str = self.tttext(generated)
-        second_text: str = self.tttext(second_best_tokens)
-        third_text: str = self.tttext(third_best_tokens)
+
+        print_colored(f"Prompt: {prompt}", "magenta")
+        print_colored(f"({token_count}/{max_tokens} - {completion:.1f}% completion)", "blue")
+        print()
+        print_colored(generated_text, "green")
 
         panel_text: str = (
-            "Prompt:\n"
-            f"{prompt}\n\n"
-            "Generated Response:\n"
-            f"{generated_text}\n\n"
-            "2nd most weighted tokens:\n"
-            f"{second_text}\n\n"
-            "3rd most weighted tokens:\n"
-            f"{third_text}"
+            f"Prompt: {prompt}\n"
+            f"({token_count}/{max_tokens} - {completion:.1f}% completion)\n\n"
+            f"{generated_text}"
         )
-
-        print("Prompt:")
-        print_colored(prompt, "blue")
-        print("\nGenerated Response:")
-        print_colored(generated_text, "green")
-        print("\n2nd most weighted tokens:")
-        print_colored(second_text, "gray")
-        print("\n3rd most weighted tokens:")
-        print_colored(third_text, "gray")
-
         self.last_rendered_lines = self._count_rendered_lines(panel_text)
 
 
@@ -236,7 +203,7 @@ def main() -> None:
             prompt: str = str(entry.get("prompt", ""))
             # print_colored("\nEnter a prompt to generate from", "magenta")
             # prompt: str = input("> ")
-            llm.generate(prompt, max_tokens=100)
+            llm.generate(prompt, max_tokens=40)
             print("\n" + "-" * 50 + "\n")
 
     except KeyboardInterrupt:
