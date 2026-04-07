@@ -6,7 +6,8 @@ import numpy as np
 from typing import Any, cast
 from .output import print_colored, p_col_arg, Terminal
 from .json_formater import (
-    read_json, validate_input_prompt, validate_function_definition
+    read_json, write_json, validate_input_prompt, validate_function_definition,
+    extract_json_from_text, is_json_complete
 )
 from .inputs import (
     execute_function, check_files_exist, check_inputs_validity
@@ -36,55 +37,23 @@ class LLM_Model:
 
     def build_pre_prompt(self) -> str:
         """Build the pre-prompt with the function definitions."""
-        pre_prompt: str = "You are a helpful assistant that can call functions to answer questions.\n\n"
-        pre_prompt += "Reply in short and concise answers, and if you need to call a function, use the following format:\n\n"
-        pre_prompt += "```\n"
-        pre_prompt += "{\n"
-        pre_prompt += '  "function_call": {\n'
-        pre_prompt += '    "name": "function_name",\n'
-        pre_prompt += '    "parameters": {\n'
-        pre_prompt += '      "param1": "value1",\n'
-        pre_prompt += '      "param2": "value2"\n'
-        pre_prompt += '    }\n'
-        pre_prompt += '  }\n'
-        pre_prompt += "}\n"
-        pre_prompt += "```\n\n"
-        pre_prompt += "Here are the available functions:\n"
+        pre_prompt: str = "Functions:\n"
         for func in self.funcdef:
             func_name: str = str(func.get("name", "unknown_function"))
-            func_desc: str = str(func.get("description", "No description provided."))
-            pre_prompt += f"- {func_name}: {func_desc}\n"
-
             parameters: Any = func.get("parameters", {})
-            pre_prompt += "  Parameters:\n"
-            if isinstance(parameters, dict) and parameters:
-                for param_name, param_spec in cast(dict[str, Any], parameters).items():
-                    if isinstance(param_spec, dict):
-                        param_spec_dict: dict[str, Any] = cast(dict[str, Any], param_spec)
-                        param_type: str = str(param_spec_dict.get("type", "any"))
-                        param_desc: str = str(param_spec_dict.get("description", "No description provided."))
-                    else:
-                        param_type = "any"
-                        param_desc = "No description provided."
-                    pre_prompt += f"    - {param_name} ({param_type}): {param_desc}\n"
-            else:
-                pre_prompt += "    - none\n"
-
-            returns: Any = func.get("returns", {})
-            if isinstance(returns, dict):
-                returns_dict: dict[str, Any] = cast(dict[str, Any], returns)
-                return_type: str = str(returns_dict.get("type", "any"))
-                return_desc: str = str(returns_dict.get("description", ""))
-            else:
-                return_type = "any"
-                return_desc = ""
-            pre_prompt += f"  Returns: {return_type} - {return_desc}\n\n"
+            param_list: list[str] = []
+            if isinstance(parameters, dict):
+                for param_name in cast(dict[str, Any], parameters).keys():
+                    param_list.append(str(param_name))
+            pre_prompt += f"{func_name}({', '.join(param_list) if param_list else ''})\n"
         return pre_prompt
 
     def generate(self, prompt: str, max_tokens: int = 10) -> str:
-        """Generate response token by token."""
+        """Generate response token by token with early stopping on complete JSON."""
+        # Prime the model to output JSON immediately after the prompt
+        full_input: str = self.pre_prompt + prompt + '\n{"function_call":{"name":"'
         # Encode prompt to token IDs
-        tokenized_inputs: list[int] = self.model.encode(self.pre_prompt + prompt)[0].tolist()
+        tokenized_inputs: list[int] = self.model.encode(full_input)[0].tolist()
         self.last_rendered_lines = 0
 
         output_tokens: list[int] = []
@@ -103,10 +72,27 @@ class LLM_Model:
             # Append to our running context
             tokenized_inputs.append(next_token_id)
 
-            # Render live output with prompt and token progression.
-            self.format_gen(prompt=prompt, generated=output_tokens, max_tokens=max_tokens)
+            # Build full JSON with prefix for display and validation
+            generated_text: str = '{"function_call":{"name":"' + self.model.decode(output_tokens)
+            
+            # Render live output with prompt and token progression (show complete JSON).
+            self.format_gen(prompt=prompt, full_json=generated_text, max_tokens=max_tokens, token_count=len(output_tokens))
 
-        generated_text: str = self.model.decode(output_tokens)
+            # Check for complete JSON and stop early.
+            if is_json_complete(generated_text):
+                # Extract the clean JSON to skip any trailing garbage
+                clean_json: dict[str, Any] | None = extract_json_from_text(generated_text)
+                if clean_json:
+                    import json as json_module
+                    print()
+                    return json_module.dumps(clean_json)
+
+        generated_text: str = '{"function_call":{"name":"' + self.model.decode(output_tokens)
+        clean_json: dict[str, Any] | None = extract_json_from_text(generated_text)
+        if clean_json:
+            import json as json_module
+            print()
+            return json_module.dumps(clean_json)
         print()
         return generated_text
     
@@ -135,26 +121,24 @@ class LLM_Model:
             total += max(1, (visible_len + cols - 1) // cols)
         return total
 
-    def format_gen(self, prompt: str, generated: list[int], max_tokens: int) -> None:
-        """Render prompt, token progression, and current response in-place."""
+    def format_gen(self, prompt: str, full_json: str, max_tokens: int, token_count: int) -> None:
+        """Render prompt, token progression, and complete JSON response in-place."""
         if self.last_rendered_lines > 0:
             Terminal.up(self.last_rendered_lines)
 
         Terminal.clear_to_end()
 
-        token_count: int = len(generated)
         completion: float = (token_count / max_tokens) * 100 if max_tokens > 0 else 0.0
-        generated_text: str = self.tttext(generated)
 
         print_colored(f"Prompt: {prompt}", "magenta")
         print_colored(f"({token_count}/{max_tokens} - {completion:.1f}% completion)", "blue")
         print()
-        print_colored(generated_text, "green")
+        print_colored(full_json, "green")
 
         panel_text: str = (
             f"Prompt: {prompt}\n"
             f"({token_count}/{max_tokens} - {completion:.1f}% completion)\n\n"
-            f"{generated_text}"
+            f"{full_json}"
         )
         self.last_rendered_lines = self._count_rendered_lines(panel_text)
 
@@ -199,12 +183,30 @@ def main() -> None:
         inputs: list[dict[str, Any]] = read_json(args.input)
         llm = LLM_Model(func_defs, inputs)
 
+        results: list[dict[str, Any]] = []
         for entry in inputs:
             prompt: str = str(entry.get("prompt", ""))
             # print_colored("\nEnter a prompt to generate from", "magenta")
             # prompt: str = input("> ")
-            llm.generate(prompt, max_tokens=40)
+            generated: str = llm.generate(prompt, max_tokens=40)
+            
+            # Extract JSON and verify it's valid
+            json_result: dict[str, Any] | None = extract_json_from_text(generated)
+            if json_result:
+                result_entry: dict[str, Any] = {
+                    "prompt": prompt,
+                    "response": json_result
+                }
+                results.append(result_entry)
+            
             print("\n" + "-" * 50 + "\n")
+        
+        # Write all results to output file
+        try:
+            write_json(args.output, results)
+            print_colored(f"Results written to {args.output}", "green")
+        except Exception as e:
+            print_colored(f"Error writing results to output file: {e}", "red")
 
     except KeyboardInterrupt:
         print_colored("\nGeneration interrupted by user.", "red")

@@ -120,6 +120,71 @@ def func_result_check(funcdef: list[dict[str, Any]],
             raise ValueError(f"Extra param '{key}' not in '{func_name}'.")
 
 
+def extract_json_from_text(text: str) -> dict[str, Any] | None:
+    """Extract minimal complete JSON from text using brace balancing.
+    Requires JSON to start at beginning, stops at first complete JSON object.
+    
+    Args:
+        text: The generated text that may contain JSON and extra garbage.
+    
+    Returns:
+        The parsed JSON dict if valid complete JSON is found, None otherwise.
+    """
+    stripped: str = text.lstrip()
+    if not stripped.startswith('{'):
+        return None
+    
+    # Find the minimal complete JSON by balancing braces
+    brace_count: int = 0
+    json_end: int = 0
+    in_string: bool = False
+    escape: bool = False
+    
+    for i, char in enumerate(stripped):
+        if escape:
+            escape = False
+            continue
+        if char == '\\':
+            escape = True
+            continue
+        if char == '"' and not escape:
+            in_string = not in_string
+            continue
+        if not in_string:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+    
+    if json_end == 0:
+        return None
+    
+    json_str: str = stripped[:json_end]
+    try:
+        parsed: dict[str, Any] = cast(dict[str, Any], json.loads(json_str))
+        # Validate it has the expected function_call structure
+        if isinstance(parsed.get("function_call"), dict):
+            return parsed
+        return None
+    except json.JSONDecodeError:
+        return None
+
+
+def is_json_complete(text: str) -> bool:
+    """Check if the text contains complete, valid function-call JSON.
+    
+    Args:
+        text: The text to check.
+    
+    Returns:
+        True if valid function-call JSON is found, False otherwise.
+    """
+    return extract_json_from_text(text) is not None
+
+
 if __name__ == "__main__":
     file: str = "data/input/functions_definition.json"
     data: list[dict[str, Any]] = read_json(file)
