@@ -1,9 +1,10 @@
 import argparse
+import re
 import sys
 import time
 import numpy as np
 from typing import Any, cast
-from .color import print_colored, p_col_arg
+from .output import print_colored, p_col_arg, Terminal
 from .json_formater import (
     read_json, validate_input_prompt, validate_function_definition
 )
@@ -27,14 +28,18 @@ class LLM_Model:
         self.model = Small_LLM_Model()
         self.funcdef: list[dict[str, Any]] = funcdef
         self.input_dict: list[dict[str, Any]] = input_dict
+        self.last_rendered_lines: int = 0
 
     def generate(self, prompt: str, max_tokens: int = 75) -> str:
         """Generate response token by token."""
         # Encode prompt to token IDs
         tokenized_inputs: list[int] = self.model.encode(prompt)[0].tolist()
-        print("Generating response token-by-token...")
+        print_colored("Generating response token-by-token...", "yellow")
+        self.last_rendered_lines = 0
 
         output_tokens: list[int] = []
+        second_best_tokens: list[int] = []
+        third_best_tokens: list[int] = []
 
         # generates tokens
         for _ in range(max_tokens):
@@ -43,24 +48,98 @@ class LLM_Model:
                 tokenized_inputs
             )
 
-            # Let's say token ID 42 is a word we NEVER want to generate
-            logits[42] = -float('inf')
+            # Keep 2nd and 3rd best token streams across generation steps.
+            top_three: list[int] = self.get_top_k_tokens(3, logits)
+            next_token_id: int = top_three[0]
+            second_best_tokens.append(top_three[1])
+            third_best_tokens.append(top_three[2])
 
-            # Let's say token ID 100 is a word we strongly encourage
-            logits[100] += 10.0
-
-            # Pick the token with the highest probability
-            next_token_id = int(np.argmax(logits))
-
-            # Decode just the new token and print it immediately
-            print(self.model.decode([next_token_id]), end="", flush=True)
+            output_tokens.append(next_token_id)
 
             # Append to our running context
             tokenized_inputs.append(next_token_id)
-            output_tokens.append(next_token_id)
 
-        print()  # Add a newline after generation finishes
+            # print the generated response so far + the rest
+            self.format_gen(
+                generated=output_tokens,
+                second_best_tokens=second_best_tokens,
+                third_best_tokens=third_best_tokens,
+                prompt=prompt
+            )
+
+        print()
         return self.model.decode(output_tokens)
+    
+    def get_top_k_tokens(self, k: int, logits: list[float]) -> list[int]:
+        """Get the top k most weighted tokens from the last generation step."""
+        # Return token IDs sorted from highest to lowest logit.
+        top_k_indices = np.argpartition(logits, -k)[-k:]
+        sorted_top_k_indices = top_k_indices[np.argsort(np.array(logits)[top_k_indices])[::-1]]
+        return sorted_top_k_indices.tolist()
+    
+    def tttext(self, tokens: list[int]) -> str:
+        """Translate a list of token IDs back to text."""
+        return self.model.decode(tokens)
+
+    def _count_rendered_lines(self, text: str) -> int:
+        """Count terminal lines including automatic wrapping."""
+        try:
+            cols: int = max(1, Terminal.get_size()[0])
+        except OSError:
+            cols = 80
+
+        ansi_re = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+        total: int = 0
+        for raw_line in text.split("\n"):
+            visible_len = len(ansi_re.sub("", raw_line))
+            total += max(1, (visible_len + cols - 1) // cols)
+        return total
+
+    def format_gen(
+            self,
+            generated: list[int],
+            second_best_tokens: list[int],
+            third_best_tokens: list[int],
+            prompt: str) -> None:
+        """Format the generated response for better readability.
+        clear terminal each time, this function is called each time
+        a new token is generated, and reprint everything:
+        - print the prompt in blue 
+        - the generated response in green
+        - the setence with all 2nd most weighted tokens in yellow
+        - the setence with all 3rd most weighted tokens in yellow
+         """
+        if self.last_rendered_lines > 0:
+            Terminal.up(self.last_rendered_lines)
+
+        Terminal.clear_to_end()
+
+        generated_text: str = self.tttext(generated)
+        second_text: str = self.tttext(second_best_tokens)
+        third_text: str = self.tttext(third_best_tokens)
+
+        panel_text: str = (
+            "Prompt:\n"
+            f"{prompt}\n\n"
+            "Generated Response:\n"
+            f"{generated_text}\n\n"
+            "2nd most weighted tokens:\n"
+            f"{second_text}\n\n"
+            "3rd most weighted tokens:\n"
+            f"{third_text}"
+        )
+
+        print("Prompt:")
+        print_colored(prompt, "blue")
+        print("\nGenerated Response:")
+        print_colored(generated_text, "green")
+        print("\n2nd most weighted tokens:")
+        print_colored(second_text, "second_best")
+        print("\n3rd most weighted tokens:")
+        print_colored(third_text, "third_best")
+
+        self.last_rendered_lines = self._count_rendered_lines(panel_text)
+
 
 
 def execute_function(name: str, parameters: dict[str, Any]) -> Any:
@@ -182,7 +261,8 @@ def main() -> None:
         llm = LLM_Model(func_defs, inputs)
 
         while True:
-            prompt: str = input("Enter a prompt to generate from: ")
+            print_colored("\nEnter a prompt to generate from", "magenta")
+            prompt: str = input("> ")
             llm.generate(prompt)
 
     except KeyboardInterrupt:
