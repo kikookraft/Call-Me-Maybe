@@ -44,7 +44,7 @@ class Color:
     def cyan(text: str) -> str:
         """Wrap text in color codes."""
         return f"{Color.CYAN}{text}{Color.RESET}"
-    
+
     @staticmethod
     def gray(text: str) -> str:
         """Wrap text in color codes."""
@@ -99,12 +99,12 @@ class Terminal:
     def enable_line_wrap(self) -> None:
         """Enable line wrapping in the terminal."""
         print("\033[?7h", end="")
-    
+
     @staticmethod
     def up(n: int = 1) -> None:
         """Move the cursor up by n lines."""
         print(f"\033[{n}A", end="")
-    
+
     @staticmethod
     def get_size() -> tuple[int, int]:
         """Get the current terminal size (columns, rows)."""

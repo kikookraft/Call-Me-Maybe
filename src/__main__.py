@@ -1,22 +1,21 @@
 import argparse
 import re
-import sys
 import time
+import json as json_module
 import numpy as np
 from typing import Any, cast
+from llm_sdk import Small_LLM_Model
 from .output import print_colored, p_col_arg, Terminal
 from .json_formater import (
-    read_json, write_json, validate_input_prompt, validate_function_definition,
-    extract_json_from_text, is_json_complete
+    read_json, write_json, extract_json_from_text, is_json_complete
 )
 from .inputs import (
-    execute_function, check_files_exist, check_inputs_validity
+    check_files_exist, check_inputs_validity
 )
 
 # because loading the model is reaaalllyyy long
 before: float = time.time()
 print_colored("Loading model, please wait...", "yellow")
-from llm_sdk import Small_LLM_Model
 print_colored(
     f"Model loaded in {(time.time() - before):.2f}",
     "green")
@@ -45,13 +44,18 @@ class LLM_Model:
             if isinstance(parameters, dict):
                 for param_name in cast(dict[str, Any], parameters).keys():
                     param_list.append(str(param_name))
-            pre_prompt += f"{func_name}({', '.join(param_list) if param_list else ''})\n"
+            params_str = ', '.join(param_list) if param_list else ''
+            pre_prompt += f"{func_name}({params_str})\n"
         return pre_prompt
 
     def generate(self, prompt: str, max_tokens: int = 10) -> str:
-        """Generate response token by token with early stopping on complete JSON."""
+        """Generate response token by token.
+
+        Early stopping on complete JSON.
+        """
         # Prime the model to output JSON immediately after the prompt
-        full_input: str = self.pre_prompt + prompt + '\n{"function_call":{"name":"'
+        full_input: str = (self.pre_prompt + prompt +
+                           '\n{"function_call":{"name":"')
         # Encode prompt to token IDs
         tokenized_inputs: list[int] = self.model.encode(full_input)[0].tolist()
         self.last_rendered_lines = 0
@@ -73,36 +77,42 @@ class LLM_Model:
             tokenized_inputs.append(next_token_id)
 
             # Build full JSON with prefix for display and validation
-            generated_text: str = '{"function_call":{"name":"' + self.model.decode(output_tokens)
-            
-            # Render live output with prompt and token progression (show complete JSON).
-            self.format_gen(prompt=prompt, full_json=generated_text, max_tokens=max_tokens, token_count=len(output_tokens))
+            prefix = '{"function_call":{"name":"'
+            generated_text: str = prefix + self.model.decode(output_tokens)
+
+            # Render live output with prompt and token progression
+            # (show complete JSON).
+            self.format_gen(prompt=prompt, full_json=generated_text,
+                            max_tokens=max_tokens,
+                            token_count=len(output_tokens))
 
             # Check for complete JSON and stop early.
             if is_json_complete(generated_text):
                 # Extract the clean JSON to skip any trailing garbage
-                clean_json: dict[str, Any] | None = extract_json_from_text(generated_text)
-                if clean_json:
-                    import json as json_module
+                clean_json_obj: dict[str, Any] | None = (
+                    extract_json_from_text(generated_text))
+                if clean_json_obj:
                     print()
-                    return json_module.dumps(clean_json)
+                    return json_module.dumps(clean_json_obj)
 
-        generated_text: str = '{"function_call":{"name":"' + self.model.decode(output_tokens)
-        clean_json: dict[str, Any] | None = extract_json_from_text(generated_text)
-        if clean_json:
-            import json as json_module
+        prefix = '{"function_call":{"name":"'
+        generated_text: str = prefix + self.model.decode(output_tokens)
+        clean_json_obj: dict[str, Any] | None = (
+            extract_json_from_text(generated_text))
+        if clean_json_obj:
             print()
-            return json_module.dumps(clean_json)
+            return json_module.dumps(clean_json_obj)
         print()
         return generated_text
-    
+
     def get_top_k_tokens(self, k: int, logits: list[float]) -> list[int]:
         """Get the top k most weighted tokens from the last generation step."""
         # Return token IDs sorted from highest to lowest logit.
         top_k_indices = np.argpartition(logits, -k)[-k:]
-        sorted_top_k_indices: Any = top_k_indices[np.argsort(np.array(logits)[top_k_indices])[::-1]]
+        sorted_indices = np.argsort(np.array(logits)[top_k_indices])[::-1]
+        sorted_top_k_indices: Any = top_k_indices[sorted_indices]
         return sorted_top_k_indices.tolist()
-    
+
     def tttext(self, tokens: list[int]) -> str:
         """Translate a list of token IDs back to text."""
         return self.model.decode(tokens)
@@ -121,23 +131,28 @@ class LLM_Model:
             total += max(1, (visible_len + cols - 1) // cols)
         return total
 
-    def format_gen(self, prompt: str, full_json: str, max_tokens: int, token_count: int) -> None:
-        """Render prompt, token progression, and complete JSON response in-place."""
+    def format_gen(self, prompt: str, full_json: str, max_tokens: int,
+                   token_count: int) -> None:
+        """Render prompt, token progression, and complete JSON response."""
+        """in-place."""
         if self.last_rendered_lines > 0:
             Terminal.up(self.last_rendered_lines)
 
         Terminal.clear_to_end()
 
-        completion: float = (token_count / max_tokens) * 100 if max_tokens > 0 else 0.0
+        completion: float = (token_count / max_tokens) * 100 if (
+            max_tokens > 0) else 0.0
 
         print_colored(f"Prompt: {prompt}", "magenta")
-        print_colored(f"({token_count}/{max_tokens} - {completion:.1f}% completion)", "blue")
+        pct = f"({token_count}/{max_tokens} - {completion:.1f}% completion)"
+        print_colored(pct, "blue")
         print()
         print_colored(full_json, "green")
 
+        pct_panel = f"({token_count}/{max_tokens} - {completion:.1f}%)"
         panel_text: str = (
             f"Prompt: {prompt}\n"
-            f"({token_count}/{max_tokens} - {completion:.1f}% completion)\n\n"
+            f"{pct_panel} completion\n\n"
             f"{full_json}"
         )
         self.last_rendered_lines = self._count_rendered_lines(panel_text)
@@ -179,34 +194,36 @@ def main() -> None:
         return
 
     try:
-        func_defs: list[dict[str, Any]] = read_json(args.functions_definition)
+        func_defs: list[dict[str, Any]] = read_json(
+            args.functions_definition)
         inputs: list[dict[str, Any]] = read_json(args.input)
         llm = LLM_Model(func_defs, inputs)
 
         results: list[dict[str, Any]] = []
         for entry in inputs:
             prompt: str = str(entry.get("prompt", ""))
-            # print_colored("\nEnter a prompt to generate from", "magenta")
-            # prompt: str = input("> ")
             generated: str = llm.generate(prompt, max_tokens=40)
-            
+
             # Extract JSON and verify it's valid
-            json_result: dict[str, Any] | None = extract_json_from_text(generated)
+            json_result: dict[str, Any] | None = (
+                extract_json_from_text(generated))
             if json_result:
                 result_entry: dict[str, Any] = {
                     "prompt": prompt,
                     "response": json_result
                 }
                 results.append(result_entry)
-            
+
             print("\n" + "-" * 50 + "\n")
-        
+
         # Write all results to output file
         try:
             write_json(args.output, results)
-            print_colored(f"Results written to {args.output}", "green")
+            success_msg = f"Results written to {args.output}"
+            print_colored(success_msg, "green")
         except Exception as e:
-            print_colored(f"Error writing results to output file: {e}", "red")
+            error_msg = f"Error writing results to output file: {e}"
+            print_colored(error_msg, "red")
 
     except KeyboardInterrupt:
         print_colored("\nGeneration interrupted by user.", "red")

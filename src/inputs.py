@@ -5,6 +5,7 @@ from .json_formater import (
     read_json, validate_input_prompt, validate_function_definition
 )
 
+
 def execute_function(name: str, parameters: dict[str, Any]) -> Any:
     """Execute a custom function by name with provided parameters."""
     if name == "fn_add_numbers":
@@ -79,5 +80,6 @@ def check_inputs_validity(func_def_path: str, input_path: str) -> bool:
             print_colored(f"Invalid input prompt: {item}", "red")
             sys.exit(1)
 
-    print_colored("All inputs and function definitions are valid.", "green")
+    msg = "All inputs and function definitions are valid."
+    print_colored(msg, "green")
     return True

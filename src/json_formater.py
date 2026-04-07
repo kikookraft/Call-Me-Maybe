@@ -22,7 +22,7 @@ def read_json(file_path: str) -> list[dict[str, Any]]:
 
 def write_json(file_path: str, data: list[dict[str, Any]]) -> None:
     """write json to file"""
-    write_file(file_path, json.dumps(data))
+    write_file(file_path, json.dumps(data, indent=4))
 
 
 def append_json(file_path: str, data: dict[str, Any]) -> None:
@@ -122,24 +122,25 @@ def func_result_check(funcdef: list[dict[str, Any]],
 
 def extract_json_from_text(text: str) -> dict[str, Any] | None:
     """Extract minimal complete JSON from text using brace balancing.
+
     Requires JSON to start at beginning, stops at first complete JSON object.
-    
+
     Args:
         text: The generated text that may contain JSON and extra garbage.
-    
+
     Returns:
         The parsed JSON dict if valid complete JSON is found, None otherwise.
     """
     stripped: str = text.lstrip()
     if not stripped.startswith('{'):
         return None
-    
+
     # Find the minimal complete JSON by balancing braces
     brace_count: int = 0
     json_end: int = 0
     in_string: bool = False
     escape: bool = False
-    
+
     for i, char in enumerate(stripped):
         if escape:
             escape = False
@@ -158,10 +159,10 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                 if brace_count == 0:
                     json_end = i + 1
                     break
-    
+
     if json_end == 0:
         return None
-    
+
     json_str: str = stripped[:json_end]
     try:
         parsed: dict[str, Any] = cast(dict[str, Any], json.loads(json_str))
@@ -175,10 +176,10 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
 
 def is_json_complete(text: str) -> bool:
     """Check if the text contains complete, valid function-call JSON.
-    
+
     Args:
         text: The text to check.
-    
+
     Returns:
         True if valid function-call JSON is found, False otherwise.
     """
