@@ -48,14 +48,21 @@ class LLM_Model:
             pre_prompt += f"{func_name}({params_str})\n"
         return pre_prompt
 
-    def generate(self, prompt: str, max_tokens: int = 10) -> str:
+    def generate(self, prompt: str, max_tokens: int = 120) -> str:
         """Generate response token by token.
 
         Early stopping on complete JSON.
         """
-        # Prime the model to output JSON immediately after the prompt
-        full_input: str = (self.pre_prompt + prompt +
-                           '\n{"function_call":{"name":"')
+        # Prime the model to output JSON immediately after the prompt.
+        full_input: str = (
+            self.pre_prompt
+            + "\nReturn ONLY a valid JSON object using this exact format:\n"
+            + '{"function_call":{"name":"<function_name>","arguments":{}}}\n'
+            + "Do not output explanations or extra text.\n"
+            + f"Prompt: {prompt}\n"
+            + "JSON:\n"
+            + '{"function_call":{"name":"'
+        )
         # Encode prompt to token IDs
         tokenized_inputs: list[int] = self.model.encode(full_input)[0].tolist()
         self.last_rendered_lines = 0
@@ -144,12 +151,12 @@ class LLM_Model:
             max_tokens > 0) else 0.0
 
         print_colored(f"Prompt: {prompt}", "magenta")
-        pct = f"({token_count}/{max_tokens} - {completion:.1f}% completion)"
+        pct: str = f"({token_count}/{max_tokens} - {completion:.1f}% completion)"
         print_colored(pct, "blue")
         print()
         print_colored(full_json, "green")
 
-        pct_panel = f"({token_count}/{max_tokens} - {completion:.1f}%)"
+        pct_panel: str = f"({token_count}/{max_tokens} - {completion:.1f}%)"
         panel_text: str = (
             f"Prompt: {prompt}\n"
             f"{pct_panel} completion\n\n"
@@ -202,27 +209,46 @@ def main() -> None:
         results: list[dict[str, Any]] = []
         for entry in inputs:
             prompt: str = str(entry.get("prompt", ""))
-            generated: str = llm.generate(prompt, max_tokens=40)
+            json_result: dict[str, Any] | None = None
+            generated: str = ""
 
-            # Extract JSON and verify it's valid
-            json_result: dict[str, Any] | None = (
-                extract_json_from_text(generated))
+            # Retry with larger generation budget before giving up.
+            for token_budget in (40, 80, 120):
+                generated = llm.generate(prompt, max_tokens=token_budget)
+                json_result = extract_json_from_text(generated)
+                if json_result:
+                    break
+                else:
+                    print_colored(
+                        f"Generated output is not valid JSON. Retrying with "
+                        f"larger token budget ({token_budget} tokens)...",
+                        "yellow"
+                    )
+
             if json_result:
-                result_entry: dict[str, Any] = {
+                results.append({
                     "prompt": prompt,
                     "response": json_result
-                }
-                results.append(result_entry)
+                })
+            else:
+                # Keep the prompt in output to avoid silently missing entries.
+                results.append({
+                    "prompt": prompt,
+                    "response": {
+                        "error": "Unable to extract valid function_call JSON",
+                        "raw": generated
+                    }
+                })
 
             print("\n" + "-" * 50 + "\n")
 
         # Write all results to output file
         try:
             write_json(args.output, results)
-            success_msg = f"Results written to {args.output}"
+            success_msg: str = f"Results written to {args.output}"
             print_colored(success_msg, "green")
         except Exception as e:
-            error_msg = f"Error writing results to output file: {e}"
+            error_msg: str = f"Error writing results to output file: {e}"
             print_colored(error_msg, "red")
 
     except KeyboardInterrupt:
