@@ -43,6 +43,7 @@ The solution decodes the LLM's raw logits output step-by-step. At each token gen
 ## Design Decisions
 - `pydantic` dynamically models the function definitions to easily validate allowed fields and types.
 - The stateful JSON parser evaluates the expected next character to compute the allowed tokens efficiently without re-evaluating the whole string from the beginning at each token step.
+- Local environment compatibility change: `llm_sdk` and dependency pins were adjusted so the provided model runs reliably on this machine's older NVIDIA GPU. This change only affects model loading/runtime compatibility (CUDA vs CPU fallback) and does not alter the constrained decoding algorithm or output schema logic.
 
 ## Performance Analysis
 The constrained generation limits the vocabulary search space, vastly improving the reliability of the small `Qwen3-0.6B` model to produce syntactically valid JSON. Accuracy in selecting the correct function and parameters is robust compared to standard unconstrained beam search, while keeping evaluation speed well within the 5-minute requirement.

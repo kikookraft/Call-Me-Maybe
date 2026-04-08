@@ -13,14 +13,6 @@ from .inputs import (
     check_files_exist, check_inputs_validity
 )
 
-# because loading the model is reaaalllyyy long
-before: float = time.time()
-print_colored("Loading model, please wait...", "yellow")
-print_colored(
-    f"Model loaded in {(time.time() - before):.2f}",
-    "green")
-
-
 class LLM_Model:
     """Contain context, llm and other things"""
 
@@ -28,7 +20,13 @@ class LLM_Model:
             self,
             funcdef: list[dict[str, Any]],
             input_dict: list[dict[str, Any]]) -> None:
+        # Loading the model can take a while (download + deserialization).
+        before: float = time.time()
+        print_colored("Loading model, please wait...", "yellow")
         self.model: Any = Small_LLM_Model()
+        print_colored(
+            f"Model loaded in {(time.time() - before):.2f}",
+            "green")
         self.funcdef: list[dict[str, Any]] = funcdef
         self.input_dict: list[dict[str, Any]] = input_dict
         self.last_rendered_lines: int = 0

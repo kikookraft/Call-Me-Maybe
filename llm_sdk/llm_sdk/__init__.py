@@ -3,6 +3,7 @@
 
 import time
 from typing import Tuple
+import warnings
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizer, PreTrainedModel, logging
@@ -43,7 +44,18 @@ class Small_LLM_Model:
             if torch.backends.mps.is_available():
                 device = "mps"
             elif torch.cuda.is_available():
-                device = "cuda"
+                try:
+                    # Probe the CUDA runtime directly; arch lists can omit
+                    # compatible devices that still work through PTX/JIT.
+                    _ = torch.empty(1, device="cuda")
+                    device = "cuda"
+                except Exception:
+                    warnings.warn(
+                        "CUDA device is available but not usable by this "
+                        "PyTorch build; falling back to CPU.",
+                        RuntimeWarning,
+                    )
+                    device = "cpu"
             else:
                 device = "cpu"
         self._device = device
@@ -63,7 +75,6 @@ class Small_LLM_Model:
         self._model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=self._dtype,
-            device_map="auto" if self._device == "cuda" else None,
             trust_remote_code=trust_remote_code,
         )
         self._model.to(self._device)
