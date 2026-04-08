@@ -64,7 +64,7 @@ def check_inputs_validity(func_def_path: str, input_path: str) -> bool:
         print_colored("Input prompts must be a list.", "red")
         return False
 
-    for func in cast(list[Any], func_defs):
+    for func in func_defs:
         if not isinstance(func, dict):
             print_colored(f"Invalid function definition: {func}", "red")
             sys.exit(1)
@@ -72,7 +72,7 @@ def check_inputs_validity(func_def_path: str, input_path: str) -> bool:
             print_colored(f"Invalid function definition: {func}", "red")
             sys.exit(1)
 
-    for item in cast(list[Any], inputs):
+    for item in inputs:
         if not isinstance(item, dict):
             print_colored(f"Invalid input prompt: {item}", "red")
             sys.exit(1)

@@ -103,14 +103,16 @@ class LLM_Model:
                     return json_module.dumps(clean_json_obj)
 
         prefix = '{"function_call":{"name":"'
-        generated_text: str = prefix + self.model.decode(output_tokens)
-        clean_json_obj: dict[str, Any] | None = (
-            extract_json_from_text(generated_text))
-        if clean_json_obj:
+        fallback_generated_text: str = (
+            prefix + self.model.decode(output_tokens)
+        )
+        fallback_clean_json_obj: dict[str, Any] | None = (
+            extract_json_from_text(fallback_generated_text))
+        if fallback_clean_json_obj:
             print()
-            return json_module.dumps(clean_json_obj)
+            return json_module.dumps(fallback_clean_json_obj)
         print()
-        return generated_text
+        return fallback_generated_text
 
     def get_top_k_tokens(self, k: int, logits: list[float]) -> list[int]:
         """Get the top k most weighted tokens from the last generation step."""
@@ -118,11 +120,11 @@ class LLM_Model:
         top_k_indices = np.argpartition(logits, -k)[-k:]
         sorted_indices = np.argsort(np.array(logits)[top_k_indices])[::-1]
         sorted_top_k_indices: Any = top_k_indices[sorted_indices]
-        return sorted_top_k_indices.tolist()
+        return cast(list[int], sorted_top_k_indices.tolist())
 
     def tttext(self, tokens: list[int]) -> str:
         """Translate a list of token IDs back to text."""
-        return self.model.decode(tokens)
+        return cast(str, self.model.decode(tokens))
 
     def _count_rendered_lines(self, text: str) -> int:
         """Count terminal lines including automatic wrapping."""
@@ -151,12 +153,14 @@ class LLM_Model:
             max_tokens > 0) else 0.0
 
         print_colored(f"Prompt: {prompt}", "magenta")
-        pct: str = f"({token_count}/{max_tokens} - {completion:.1f}% completion)"
+        pct: str = f"({token_count}/{max_tokens} - "
+        pct += f"{completion:.1f}% completion)"
         print_colored(pct, "blue")
         print()
         print_colored(full_json, "green")
 
-        pct_panel: str = f"({token_count}/{max_tokens} - {completion:.1f}%)"
+        pct_panel: str = f"({token_count}/{max_tokens} - "
+        pct_panel += f"{completion:.1f}% completion)"
         panel_text: str = (
             f"Prompt: {prompt}\n"
             f"{pct_panel} completion\n\n"
