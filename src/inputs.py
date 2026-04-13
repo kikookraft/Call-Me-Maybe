@@ -1,7 +1,11 @@
 import os
 from typing import Any, cast
 
-from .json_formater import read_json, validate_function_definition, validate_input_prompt
+from .json_formater import (
+    read_json,
+    validate_function_definition,
+    validate_input_prompt,
+)
 from .output import print_colored
 
 
@@ -26,9 +30,13 @@ def execute_function(name: str, parameters: dict[str, Any]) -> Any:
 
 def check_files_exist(*file_paths: str) -> bool:
     """Verify that all required files exist."""
-    missing_files: list[str] = [file for file in file_paths if not os.path.isfile(file)]
+    missing_files: list[str] = [
+        file for file in file_paths if not os.path.isfile(file)
+    ]
     if missing_files:
-        print_colored(f"Missing required files: {', '.join(missing_files)}", "red")
+        print_colored(
+            f"Missing required files: {', '.join(missing_files)}", "red"
+        )
         return False
     return True
 

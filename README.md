@@ -3,7 +3,8 @@
 # Call Me Maybe - Introduction to function calling in LLMs
 
 ## Description
-This project aims to implement a function calling tool that translates natural language prompts into structured function calls using constrained decoding with a small language model (`Qwen/Qwen3-0.6B`). It bridges the gap between natural language requests and precise function execution by guiding the model token-by-token to output 100% valid JSON matching a specific schema.
+This project aims to implement a function calling tool that translates prompts into structured function calls using constrained decoding with a small language model (`Qwen/Qwen3-0.6B`).  
+It bridges the gap between human requests and precise function execution by guiding the model token-by-token to output 100% valid JSON matching a specific schema.
 
 ## Instructions
 To install and run this project, make sure you have Python 3.10+ and [`uv`](https://github.com/astral-sh/uv) installed on your system. 
@@ -35,7 +36,8 @@ uv run python -m src --functions_definition data/input/functions_definition.json
 - [Pydantic documentation](https://docs.pydantic.dev/latest/)
 - [Constrained Decoding in LLMs](https://arxiv.org/abs/2307.09702)
 
-**AI Usage:** AI was used in this project to assist in understanding constrained decoding theory, drafting boilerplate token masking structures, and generating regular expressions for docstrings validation.
+**AI Usage:** AI was used in this project to assist in understanding constrained decoding, readme writing,
+and generating regular expressions for docstrings validation.
 
 ## Algorithm Explanation
 The solution first asks the model to choose a function name from the available definitions using token-level prefix constraints, so only names that match a valid function remain possible during decoding. Once the function is selected, the program generates short value candidates for each parameter, validates them against the expected type, and assembles the final result with Pydantic before writing it with `json.dumps`. This keeps the output schema strict while still letting the model decide the function call.

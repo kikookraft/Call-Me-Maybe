@@ -2,7 +2,7 @@ import argparse
 import os
 import re
 import time
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from llm_sdk import Small_LLM_Model
 
@@ -37,7 +37,8 @@ class TokenChoiceDecoder:
         max_tokens: int = 32,
         render_step: Callable[[str, int, int], None] | None = None,
     ) -> str:
-        """Generate one option by keeping only tokens compatible with the prefix."""
+        """Generate one option by keeping only tokens compatible
+        with the prefix."""
         if not options:
             raise ValueError("At least one option is required.")
 
@@ -56,13 +57,15 @@ class TokenChoiceDecoder:
                 if not token_text:
                     continue
                 candidate_text: str = generated_text + token_text
-                if any(option.startswith(candidate_text) for option in options):
+                if any(option.startswith(candidate_text)
+                       for option in options):
                     valid_token_ids.append(token_id)
 
             if not valid_token_ids:
                 break
 
-            next_token_id: int = max(valid_token_ids, key=lambda token_id: logits[token_id])
+            next_token_id: int = max(
+                valid_token_ids, key=lambda token_id: logits[token_id])
             generated_ids.append(next_token_id)
             generated_text += self._token_text(next_token_id)
 
@@ -91,7 +94,8 @@ class LLM_Model:
         before: float = time.time()
         print_colored("Loading model, please wait...", "yellow")
         self.model: Small_LLM_Model = Small_LLM_Model()
-        print_colored(f"Model loaded in {(time.time() - before):.2f}", "green")
+        print_colored(
+            f"Model loaded in {(time.time() - before):.2f}", "green")
         self.funcdef: list[FunctionDefinition] = [
             FunctionDefinition.model_validate(item) for item in funcdef
         ]
@@ -133,7 +137,8 @@ class LLM_Model:
             Terminal.up(self.last_dynamic_lines)
             Terminal.clear_to_end()
 
-        completion: float = (token_count / max_tokens) * 100 if max_tokens > 0 else 0.0
+        completion: float = (
+            token_count / max_tokens) * 100 if max_tokens > 0 else 0.0
         print_colored(f"Stage: {stage}", "cyan")
         print_colored(
             f"({token_count}/{max_tokens} - {completion:.1f}% completion)",
@@ -181,7 +186,8 @@ class LLM_Model:
             logits: list[float] = self.model.get_logits_from_input_ids(
                 prompt_ids + generated_ids
             )
-            next_token_id: int = max(range(len(logits)), key=logits.__getitem__)
+            next_token_id: int = max(
+                range(len(logits)), key=logits.__getitem__)
             generated_ids.append(next_token_id)
             token_text: str = self.model.decode([next_token_id])
             current_text: str = self.model.decode(generated_ids).strip()
@@ -195,21 +201,28 @@ class LLM_Model:
             if "\n" in token_text:
                 break
 
-        return self.model.decode(generated_ids).strip()
+        decoded_text: str = cast(str, self.model.decode(generated_ids))
+        return decoded_text.strip()
 
     def _choose_function(self, prompt: str) -> FunctionDefinition:
         """Pick the function name with constrained decoding."""
         function_names: list[str] = [func.name for func in self.funcdef]
-        chosen_name: str = self.decoder.choose(
-            self._function_prompt(prompt),
-            function_names,
-            render_step=lambda current, token_count, max_tokens: self._render_live_panel(
+
+        def render_step(
+            current: str, token_count: int, max_tokens: int
+        ) -> None:
+            self._render_live_panel(
                 prompt=prompt,
                 stage="function selection",
                 current_text=current,
                 token_count=token_count,
                 max_tokens=max_tokens,
-            ),
+            )
+
+        chosen_name: str = self.decoder.choose(
+            self._function_prompt(prompt),
+            function_names,
+            render_step=render_step,
         )
         for func in self.funcdef:
             if func.name == chosen_name:
@@ -250,7 +263,9 @@ class LLM_Model:
 
         return raw_text.strip().strip('"').strip("'")
 
-    def _extract_value(self, prompt: str, raw_text: str, type_name: str) -> Any:
+    def _extract_value(
+        self, prompt: str, raw_text: str, type_name: str
+    ) -> Any:
         """Convert model output to the expected JSON type."""
         if type_name == "number":
             return self._extract_number(prompt, raw_text)

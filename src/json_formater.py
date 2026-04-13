@@ -30,7 +30,9 @@ def write_json(file_path: str, data: list[dict[str, Any]]) -> None:
 
 def append_json(file_path: str, data: dict[str, Any]) -> None:
     """Add a dict to a JSON file."""
-    existing_data: list[dict[str, Any]] = cast(list[dict[str, Any]], read_json(file_path))
+    existing_data: list[dict[str, Any]] = cast(
+        list[dict[str, Any]], read_json(file_path)
+    )
     existing_data.append(data)
     write_json(file_path, existing_data)
 
@@ -53,7 +55,9 @@ def validate_function_definition(funcdef: dict[str, Any]) -> bool:
     return True
 
 
-def func_result_check(funcdef: list[dict[str, Any]], prompt: dict[str, Any]) -> None:
+def func_result_check(
+    funcdef: list[dict[str, Any]], prompt: dict[str, Any]
+) -> None:
     """Search in the function definition and verify the parameters types."""
     if "name" not in prompt or "parameters" not in prompt:
         raise ValueError("Prompt is missing 'name' or 'parameters'.")
