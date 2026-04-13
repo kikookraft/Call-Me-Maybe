@@ -18,7 +18,7 @@ This project uses the `Qwen/Qwen3-0.6B` model via the provided `llm_sdk`. To ens
 3. The SDK will automatically handle fetching the required model artifacts when you run the main script. Alternatively, you might need to run the specific SDK preparation script if provided, or simply run the main application:
 
 ```bash
-python3 -m uv run python -m src --functions_definition data/input/functions_definition.json --input data/input/function_calling_tests.json --output data/output/function_calls.json
+uv run python -m src --functions_definition data/input/functions_definition.json --input data/input/function_calling_tests.json --output data/output/function_calling_results.json
 ```
 
 ### Makefile Targets
@@ -38,25 +38,25 @@ python3 -m uv run python -m src --functions_definition data/input/functions_defi
 **AI Usage:** AI was used in this project to assist in understanding constrained decoding theory, drafting boilerplate token masking structures, and generating regular expressions for docstrings validation.
 
 ## Algorithm Explanation
-The solution decodes the LLM's raw logits output step-by-step. At each token generation step, it parses the previously generated text and restricts ("constrains") the vocabulary list by evaluating valid tokens based on JSON grammar rules and the target Pydantic schema structure. Invalid tokens are flagged by setting their logits to negative infinity. 
+The solution first asks the model to choose a function name from the available definitions using token-level prefix constraints, so only names that match a valid function remain possible during decoding. Once the function is selected, the program generates short value candidates for each parameter, validates them against the expected type, and assembles the final result with Pydantic before writing it with `json.dumps`. This keeps the output schema strict while still letting the model decide the function call.
 
 ## Design Decisions
-- `pydantic` dynamically models the function definitions to easily validate allowed fields and types.
-- The stateful JSON parser evaluates the expected next character to compute the allowed tokens efficiently without re-evaluating the whole string from the beginning at each token step.
-- Local environment compatibility change: `llm_sdk` and dependency pins were adjusted so the provided model runs reliably on this machine's older NVIDIA GPU. This change only affects model loading/runtime compatibility (CUDA vs CPU fallback) and does not alter the constrained decoding algorithm or output schema logic.
+- `pydantic` validates function definitions, inputs, and the final output object so schema mistakes are caught early.
+- The decoder stays small on purpose: it only constrains the function-name choice, then lets the program validate and serialize the final parameters.
 
 ## Performance Analysis
-The constrained generation limits the vocabulary search space, vastly improving the reliability of the small `Qwen3-0.6B` model to produce syntactically valid JSON. Accuracy in selecting the correct function and parameters is robust compared to standard unconstrained beam search, while keeping evaluation speed well within the 5-minute requirement.
+Constraining the function-name search space keeps decoding focused on the valid function set and removes malformed output at the schema level. The final JSON serialization is deterministic, so the program stays reliable even when the model produces noisy intermediate text. The implementation remains lightweight enough to stay within the time budget for the provided prompt set.
 
 ## Challenges Faced
-- Managing tokenization idiosyncrasies (e.g., spaces inside tokens, split variables) while matching against continuous JSON strings required a custom token-prefix matching index structure.
+- Handling model output that is not always clean required a fallback path that still returns a valid object instead of crashing.
+- Keeping the code simple while still validating nested function definitions with Pydantic took some care.
 
 ## Testing Strategy
-Basic tests were carried out on common prompts with the provided input files. Additional stress tests covered invalid inputs and diverse argument inputs using `pytest` to verify the JSON structure remained 100% compliant under unconstrained logic faults.
+Basic tests were carried out with the provided input files and a few malformed JSON cases. The validation helpers were checked against missing files, invalid function definitions, and empty prompts to make sure the program reports the problem cleanly instead of crashing.
 
 ## Example usage
 ```bash
 make run
 # or
-python3 -m uv run python -m src --input custom_prompts.json --output result.json
+uv run python -m src --input custom_prompts.json --output result.json
 ```
