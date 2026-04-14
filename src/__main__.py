@@ -223,6 +223,15 @@ class LLM_Model:
             lines.append(f"- {func.name}: {func.description}")
         lines.append(f"Prompt: {prompt}")
         lines.append("Function name:")
+        # if fn_not_implemented exist
+        # tell the AI to use them when appropriate
+        if any(func.name == "fn_not_implemented" for func in self.funcdef):
+            lines.append(
+                (
+                    "choose fn_not_implemented if the prompt does not match"
+                    "any function or is not a valid request"
+                )
+            )
         return "\n".join(lines)
 
     def _generate_text(
