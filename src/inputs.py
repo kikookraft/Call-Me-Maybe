@@ -1,4 +1,6 @@
 import os
+import re
+from math import sqrt
 from typing import Any, cast
 
 from .json_formater import (
@@ -25,6 +27,16 @@ def execute_function(name: str, parameters: dict[str, Any]) -> Any:
     if name == "fn_reverse_string":
         s: Any = parameters.get("s", "")
         return str(s)[::-1]
+    if name == "fn_get_square_root":
+        a: Any = parameters.get("a", 0)
+        return sqrt(float(a))
+    if name == "fn_substitute_string_with_regex":
+        source_string: str = str(parameters.get("source_string", ""))
+        regex: str = str(parameters.get("regex", ""))
+        replacement: str = str(parameters.get("replacement", ""))
+        if regex == "":
+            return source_string
+        return re.sub(regex, replacement, source_string)
     raise ValueError(f"Unknown function: {name}")
 
 

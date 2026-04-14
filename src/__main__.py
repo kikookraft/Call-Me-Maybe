@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from llm_sdk import Small_LLM_Model
 
-from .inputs import check_files_exist, check_inputs_validity
+from .inputs import check_files_exist, check_inputs_validity, execute_function
 from .json_formater import func_result_check, read_json, write_json
 from .output import Terminal, p_col_arg, print_colored
 from .schemas import (
@@ -188,27 +188,23 @@ class LLM_Model:
             Terminal.up(self.last_dynamic_lines)
             Terminal.clear_to_end()
 
-        completion: float = (
-            token_count / max_tokens) * 100 if max_tokens > 0 else 0.0
+        current_color: str = (
+            "gray" if stage == "function selection" else "green"
+        )
         print_colored(f"Stage: {stage}", "cyan")
         print_colored(
-            f"({token_count}/{max_tokens} - {completion:.1f}% completion)",
-            "blue",
+            current_text if current_text else "<empty>",
+            current_color,
         )
-        print()
-        print_colored(current_text if current_text else "<empty>", "green")
 
         dynamic_text: str = (
             f"Stage: {stage}\n"
-            f"({token_count}/{max_tokens} - {completion:.1f}% completion)\n\n"
             f"{current_text if current_text else '<empty>'}"
         )
         self.last_dynamic_lines = self._count_rendered_lines(dynamic_text)
 
     def _finish_live_panel(self) -> None:
         """Finish one live rendering block."""
-        if self.panel_header_printed:
-            print()
         self.panel_header_printed = False
         self.last_dynamic_lines = 0
 
@@ -493,6 +489,25 @@ def _default_parameters(function_def: FunctionDefinition) -> dict[str, Any]:
     return defaults
 
 
+def _print_result_preview(result: dict[str, Any]) -> None:
+    """Print computed execution output with clear spacing."""
+    name_value: Any = result.get("name")
+    raw_params: Any = result.get("parameters")
+    function_name: str = str(name_value)
+
+    if not isinstance(raw_params, dict):
+        print_colored("Output: <invalid parameters>", "red")
+        print()
+        return
+
+    try:
+        executed_output: Any = execute_function(function_name, raw_params)
+        p_col_arg("Output", str(executed_output), "green")
+    except Exception as e:
+        print_colored(f"Output execution failed: {e}", "red")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Call Me Maybe - Function Calling with LLMs"
@@ -572,6 +587,8 @@ def main() -> None:
                     "yellow",
                 )
                 func_result_check(func_defs, result)
+
+            _print_result_preview(result)
             results.append(result)
 
         try:
