@@ -196,15 +196,18 @@ class LLM_Model:
         current_color: str = (
             "gray" if stage == "function selection" else "green"
         )
-        print_colored(f"Stage: {stage}", "cyan")
         print_colored(
             current_text if current_text else "<empty>",
             current_color,
         )
+        print_colored(
+            f"({token_count}/{max_tokens})",
+            "yellow",
+        )
 
         dynamic_text: str = (
-            f"Stage: {stage}\n"
-            f"{current_text if current_text else '<empty>'}"
+            f"{current_text if current_text else '<empty>'}\n"
+            f"({token_count}/{max_tokens})"
         )
         self.last_dynamic_lines = self._count_rendered_lines(dynamic_text)
 
