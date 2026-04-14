@@ -21,3 +21,6 @@ lint:
 lint-strict:
 	uv run flake8 . --exclude=.venv,__init__.py
 	uv run mypy . --strict
+
+ask: install
+	uv run python -m src --interactive

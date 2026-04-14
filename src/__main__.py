@@ -7,7 +7,12 @@ from typing import Any, Callable
 from llm_sdk import Small_LLM_Model
 
 from .inputs import check_files_exist, check_inputs_validity, execute_function
-from .json_formater import func_result_check, read_json, write_json
+from .json_formater import (
+    func_result_check,
+    read_json,
+    validate_function_definition,
+    write_json,
+)
 from .output import Terminal, p_col_arg, print_colored
 from .schemas import (
     FunctionCallResult,
@@ -508,6 +513,108 @@ def _print_result_preview(result: dict[str, Any]) -> None:
     print()
 
 
+def _build_result_with_fallback(
+    llm: LLM_Model,
+    func_defs: list[dict[str, Any]],
+    prompt: str,
+) -> dict[str, Any]:
+    """Build one result and apply the same fallback policy if needed."""
+    try:
+        result: dict[str, Any] = llm.build_result(prompt)
+        func_result_check(func_defs, result)
+        return result
+    except Exception as e:
+        print_colored(
+            f"Failed to build a result for prompt '{prompt}': {e}",
+            "red",
+        )
+        fallback_function: FunctionDefinition = llm.funcdef[0]
+        fallback_result: dict[str, Any] = FunctionCallResult(
+            prompt=prompt,
+            name=fallback_function.name,
+            parameters=_default_parameters(fallback_function),
+        ).model_dump(mode="json")
+        print_colored(
+            (
+                "Using explicit fallback result with default parameter"
+                " values."
+            ),
+            "yellow",
+        )
+        func_result_check(func_defs, fallback_result)
+        return fallback_result
+
+
+def _validate_functions_only(functions_definition_path: str) -> bool:
+    """Validate function definitions for interactive mode."""
+    try:
+        func_defs_raw: Any = read_json(functions_definition_path)
+    except Exception as e:
+        print_colored(f"Error reading function definitions: {e}", "red")
+        return False
+
+    if not isinstance(func_defs_raw, list):
+        print_colored("Function definitions must be a list.", "red")
+        return False
+    if len(func_defs_raw) == 0:
+        print_colored("Function definitions list cannot be empty.", "red")
+        return False
+
+    for func in func_defs_raw:
+        if (
+            not isinstance(func, dict)
+            or not validate_function_definition(func)
+        ):
+            print_colored(f"Invalid function definition: {func}", "red")
+            return False
+    return True
+
+
+def _interactive_loop(
+    llm: LLM_Model,
+    func_defs: list[dict[str, Any]],
+    output_path: str,
+) -> None:
+    """Run interactive prompt loop until Ctrl+C/Ctrl+D."""
+    print_colored(
+        "Interactive mode enabled. Press Ctrl+C or Ctrl+D to exit.",
+        "cyan",
+    )
+
+    results: list[dict[str, Any]] = []
+
+    while True:
+        try:
+            user_prompt: str = input("Prompt> ").strip()
+        except EOFError:
+            print_colored("Interactive mode closed (Ctrl+D).", "yellow")
+            break
+        except KeyboardInterrupt:
+            print_colored("\nInteractive mode interrupted (Ctrl+C).", "yellow")
+            break
+
+        if user_prompt == "":
+            continue
+
+        result: dict[str, Any] = _build_result_with_fallback(
+            llm=llm,
+            func_defs=func_defs,
+            prompt=user_prompt,
+        )
+        _print_result_preview(result)
+        results.append(result)
+
+    output_dir: str = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    try:
+        write_json(output_path, results)
+        print_colored(f"Results written to {output_path}", "green")
+    except Exception as e:
+        print_colored(f"Error writing results to output file: {e}", "red")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Call Me Maybe - Function Calling with LLMs"
@@ -530,23 +637,42 @@ def main() -> None:
         default="data/output/function_calling_results.json",
         help="Path to output file",
     )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Run interactive prompt mode instead of reading --input file",
+    )
     args: argparse.Namespace = parser.parse_args()
 
     try:
-        if not check_files_exist(args.functions_definition, args.input):
-            return
-        if not check_inputs_validity(args.functions_definition, args.input):
-            return
-        p_col_arg("Input file", args.input, "blue")
+        if args.interactive:
+            if not check_files_exist(args.functions_definition):
+                return
+            if not _validate_functions_only(args.functions_definition):
+                return
+        else:
+            if not check_files_exist(args.functions_definition, args.input):
+                return
+            if not check_inputs_validity(
+                args.functions_definition,
+                args.input,
+            ):
+                return
+            p_col_arg("Input file", args.input, "blue")
         p_col_arg("Function definitions", args.functions_definition, "blue")
-        p_col_arg("Output file", args.output, "blue")
+        if args.interactive:
+            p_col_arg("Output file", args.output, "blue")
+        else:
+            p_col_arg("Output file", args.output, "blue")
     except Exception as e:
         print_colored(f"Error checking files: {e}", "red")
         return
 
     try:
         func_defs: list[dict[str, Any]] = read_json(args.functions_definition)
-        inputs: list[dict[str, Any]] = read_json(args.input)
+        inputs: list[dict[str, Any]] = []
+        if not args.interactive:
+            inputs = read_json(args.input)
         if not func_defs:
             print_colored(
                 (
@@ -558,6 +684,11 @@ def main() -> None:
             return
         llm = LLM_Model(func_defs, inputs)
 
+        if args.interactive:
+            _interactive_loop(llm, func_defs, args.output)
+            print_colored("Exiting program. Please wait...", "yellow")
+            return
+
         output_dir: str = os.path.dirname(args.output)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
@@ -565,28 +696,11 @@ def main() -> None:
         results: list[dict[str, Any]] = []
         for entry in inputs:
             prompt: str = str(entry.get("prompt", ""))
-            try:
-                result = llm.build_result(prompt)
-                func_result_check(func_defs, result)
-            except Exception as e:
-                print_colored(
-                    f"Failed to build a result for prompt '{prompt}': {e}",
-                    "red",
-                )
-                fallback_function: FunctionDefinition = llm.funcdef[0]
-                result = FunctionCallResult(
-                    prompt=prompt,
-                    name=fallback_function.name,
-                    parameters=_default_parameters(fallback_function),
-                ).model_dump(mode="json")
-                print_colored(
-                    (
-                        "Using explicit fallback result with default parameter"
-                        " values."
-                    ),
-                    "yellow",
-                )
-                func_result_check(func_defs, result)
+            result = _build_result_with_fallback(
+                llm=llm,
+                func_defs=func_defs,
+                prompt=prompt,
+            )
 
             _print_result_preview(result)
             results.append(result)

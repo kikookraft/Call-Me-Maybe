@@ -37,6 +37,8 @@ def execute_function(name: str, parameters: dict[str, Any]) -> Any:
         if regex == "":
             return source_string
         return re.sub(regex, replacement, source_string)
+    if name == "fn_not_implemented":
+        return "<not implemented>"
     raise ValueError(f"Unknown function: {name}")
 
 

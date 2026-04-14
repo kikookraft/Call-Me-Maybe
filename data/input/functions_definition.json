@@ -1,7 +1,37 @@
 [
   {
     "name": "fn_add_numbers",
-    "description": "Add two numbers together and return their sum.",
+    "description": "Add two numbers (addition operator +). Use for sum, total, plus operations.",
+    "parameters": {
+      "a": {
+        "type": "number"
+      },
+      "b": {
+        "type": "number"
+      }
+    },
+    "returns": {
+      "type": "number"
+    }
+  },
+  {
+    "name": "fn_multiply_numbers",
+    "description": "Multiply two numbers (multiplication operator *). Use for product, times, multiply operations.",
+    "parameters": {
+      "a": {
+        "type": "number"
+      },
+      "b": {
+        "type": "number"
+      }
+    },
+    "returns": {
+      "type": "number"
+    }
+  },
+  {
+    "name": "fn_divide_numbers",
+    "description": "Divide first number by second (division operator /). Use for division, quotient, divided by operations.",
     "parameters": {
       "a": {
         "type": "number"
@@ -64,6 +94,14 @@
         "type": "string"
       }
     },
+    "returns": {
+      "type": "string"
+    }
+  },
+  {
+    "name": "fn_not_implemented",
+    "description": "Placeholder for requests that do not match any available function.",
+    "parameters": {},
     "returns": {
       "type": "string"
     }
