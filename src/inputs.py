@@ -53,6 +53,9 @@ def check_inputs_validity(func_def_path: str, input_path: str) -> bool:
     if not isinstance(func_defs_raw, list):
         print_colored("Function definitions must be a list.", "red")
         return False
+    if len(func_defs_raw) == 0:
+        print_colored("Function definitions list cannot be empty.", "red")
+        return False
 
     if not isinstance(inputs_raw, list):
         print_colored("Input prompts must be a list.", "red")

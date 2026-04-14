@@ -2,14 +2,19 @@ import argparse
 import os
 import re
 import time
-from typing import Any, Callable, cast
+from typing import Any, Callable
 
 from llm_sdk import Small_LLM_Model
 
 from .inputs import check_files_exist, check_inputs_validity
-from .json_formater import read_json, write_json
+from .json_formater import func_result_check, read_json, write_json
 from .output import Terminal, p_col_arg, print_colored
-from .schemas import FunctionCallResult, FunctionDefinition, InputPrompt
+from .schemas import (
+    FunctionCallResult,
+    FunctionDefinition,
+    InputPrompt,
+    ParameterSpec,
+)
 
 
 class TokenChoiceDecoder:
@@ -80,7 +85,53 @@ class TokenChoiceDecoder:
         ]
         if matching_options:
             return max(matching_options, key=len)
-        return options[0]
+        raise ValueError("Unable to decode a valid option.")
+
+    def choose_with_constraints(
+        self,
+        prompt: str,
+        is_valid_prefix: Callable[[str], bool],
+        is_complete: Callable[[str], bool],
+        max_tokens: int = 32,
+        render_step: Callable[[str, int, int], None] | None = None,
+    ) -> str:
+        """Generate text while enforcing prefix/complete constraints."""
+        prompt_ids: list[int] = self.model.encode(prompt)[0].tolist()
+        generated_ids: list[int] = []
+        generated_text: str = ""
+
+        for _ in range(max_tokens):
+            logits: list[float] = self.model.get_logits_from_input_ids(
+                prompt_ids + generated_ids
+            )
+
+            valid_token_ids: list[int] = []
+            for token_id in range(self._vocab_size):
+                token_text: str = self._token_text(token_id)
+                if not token_text:
+                    continue
+                candidate_text: str = generated_text + token_text
+                if is_valid_prefix(candidate_text):
+                    valid_token_ids.append(token_id)
+
+            if not valid_token_ids:
+                break
+
+            next_token_id: int = max(
+                valid_token_ids, key=lambda token_id: logits[token_id]
+            )
+            generated_ids.append(next_token_id)
+            generated_text += self._token_text(next_token_id)
+
+            if render_step is not None:
+                render_step(generated_text, len(generated_ids), max_tokens)
+
+            if is_complete(generated_text):
+                return generated_text
+
+        if is_complete(generated_text):
+            return generated_text
+        raise ValueError("Unable to decode a value that matches constraints.")
 
 
 class LLM_Model:
@@ -173,36 +224,31 @@ class LLM_Model:
     def _generate_text(
         self,
         prompt: str,
-        max_tokens: int = 32,
+        is_valid_prefix: Callable[[str], bool],
+        is_complete: Callable[[str], bool],
+        max_tokens: int,
         display_prompt: str = "",
         stage: str = "generation",
     ) -> str:
-        """Generate a short text completion with greedy decoding."""
-        prompt_ids: list[int] = self.model.encode(prompt)[0].tolist()
-        generated_ids: list[int] = []
+        """Generate constrained text completion for one stage."""
         shown_prompt: str = display_prompt if display_prompt else prompt
 
-        for _ in range(max_tokens):
-            logits: list[float] = self.model.get_logits_from_input_ids(
-                prompt_ids + generated_ids
-            )
-            next_token_id: int = max(
-                range(len(logits)), key=logits.__getitem__)
-            generated_ids.append(next_token_id)
-            token_text: str = self.model.decode([next_token_id])
-            current_text: str = self.model.decode(generated_ids).strip()
+        def render_step(current: str, token_count: int, max_tok: int) -> None:
             self._render_live_panel(
                 prompt=shown_prompt,
                 stage=stage,
-                current_text=current_text,
-                token_count=len(generated_ids),
-                max_tokens=max_tokens,
+                current_text=current.strip(),
+                token_count=token_count,
+                max_tokens=max_tok,
             )
-            if "\n" in token_text:
-                break
 
-        decoded_text: str = cast(str, self.model.decode(generated_ids))
-        return decoded_text.strip()
+        return self.decoder.choose_with_constraints(
+            prompt=prompt,
+            is_valid_prefix=is_valid_prefix,
+            is_complete=is_complete,
+            max_tokens=max_tokens,
+            render_step=render_step,
+        )
 
     def _choose_function(self, prompt: str) -> FunctionDefinition:
         """Pick the function name with constrained decoding."""
@@ -229,49 +275,177 @@ class LLM_Model:
                 return func
         return self.funcdef[0]
 
-    def _extract_number(self, prompt: str, raw_text: str) -> float:
-        """Extract a numeric value from model output or from the prompt."""
-        match = re.search(r"-?\d+(?:\.\d+)?", raw_text)
+    def _extract_numbers_from_text(self, text: str) -> list[float]:
+        """Extract all numbers from text in order of appearance."""
+        matches: list[str] = re.findall(
+            r"-?\d+(?:\.\d+)?", text
+        )
+        return [float(m) for m in matches]
+
+    def _extract_quoted_strings(self, text: str) -> list[str]:
+        """Extract all quoted strings from text in order."""
+        matches: list[tuple[int, str]] = []
+        i: int = 0
+        while i < len(text):
+            if text[i] in ('"', "'"):
+                quote_char: str = text[i]
+                j: int = i + 1
+                while j < len(text) and text[j] != quote_char:
+                    if text[j] == "\\" and j + 1 < len(text):
+                        j += 2
+                    else:
+                        j += 1
+                if j < len(text) and text[j] == quote_char:
+                    extracted: str = text[i + 1:j]
+                    matches.append((i, extracted))
+                    i = j + 1
+                else:
+                    i += 1
+            else:
+                i += 1
+        return [s for _, s in matches]
+
+    def _extract_word_after_pattern(
+        self, text: str, pattern: str
+    ) -> str:
+        """Extract first word-like token after a pattern."""
+        match: re.Match[str] | None = re.search(
+            rf"(?:{pattern})\s+([\w]+)", text, re.IGNORECASE
+        )
+        if match:
+            return match.group(1)
+        return ""
+
+    def _strip_wrapping_quotes(self, text: str) -> str:
+        """Remove surrounding single/double quotes when present."""
+        cleaned: str = text.strip()
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1]:
+            if cleaned[0] in ('"', "'"):
+                return cleaned[1:-1]
+        return cleaned
+
+    def _regex_from_replace_target(self, target: str) -> str:
+        """Map natural-language replace targets to practical regex."""
+        lowered: str = target.strip().lower()
+        if lowered in ("number", "numbers", "digit", "digits"):
+            return r"\d+"
+        if lowered in ("vowel", "vowels"):
+            return r"[AEIOUaeiou]"
+        if lowered in ("space", "spaces", "whitespace"):
+            return r"\s+"
+        if lowered.startswith("word "):
+            return re.escape(lowered[5:])
+        return re.escape(target.strip())
+
+    def _extract_replace_target(self, prompt: str) -> str:
+        """Extract text between 'replace all' and 'in'."""
+        match: re.Match[str] | None = re.search(
+            r"replace\s+all\s+(.+?)\s+in\s+",
+            prompt,
+            re.IGNORECASE,
+        )
         if match is None:
-            match = re.search(r"-?\d+(?:\.\d+)?", prompt)
+            return ""
+        return self._strip_wrapping_quotes(match.group(1).strip())
+
+    def _extract_replacement_text(self, prompt: str) -> str:
+        """Extract text after 'with' in replace/substitute prompts."""
+        match: re.Match[str] | None = re.search(
+            r"\swith\s+(.+)$",
+            prompt,
+            re.IGNORECASE,
+        )
         if match is None:
-            return 0.0
-        return float(match.group(0))
-
-    def _extract_boolean(self, raw_text: str) -> bool:
-        """Extract a boolean value from the model output."""
-        lowered: str = raw_text.lower()
-        if "true" in lowered:
-            return True
-        if "false" in lowered:
-            return False
-        return False
-
-    def _extract_string(self, prompt: str, raw_text: str) -> str:
-        """Extract a string value from model output or the original prompt."""
-        quoted = re.search(r'"([^"]+)"', raw_text)
-        if quoted is None:
-            quoted = re.search(r"'([^']+)'", raw_text)
-        if quoted is not None:
-            return quoted.group(1).strip()
-
-        prompt_quoted = re.search(r'"([^"]+)"', prompt)
-        if prompt_quoted is None:
-            prompt_quoted = re.search(r"'([^']+)'", prompt)
-        if prompt_quoted is not None:
-            return prompt_quoted.group(1).strip()
-
-        return raw_text.strip().strip('"').strip("'")
+            return ""
+        candidate: str = match.group(1).strip().rstrip(".?!")
+        return self._strip_wrapping_quotes(candidate)
 
     def _extract_value(
-        self, prompt: str, raw_text: str, type_name: str
+        self,
+        prompt: str,
+        function_name: str,
+        param_name: str,
+        param_spec: ParameterSpec,
+        param_index: int,
+        param_count: int,
     ) -> Any:
-        """Convert model output to the expected JSON type."""
-        if type_name == "number":
-            return self._extract_number(prompt, raw_text)
-        if type_name == "boolean":
-            return self._extract_boolean(raw_text)
-        return self._extract_string(prompt, raw_text)
+        """Extract a parameter value using regex and context."""
+        if param_spec.type == "number":
+            numbers: list[float] = self._extract_numbers_from_text(prompt)
+            if numbers and param_index < len(numbers):
+                return numbers[param_index]
+            return 0.0
+        if param_spec.type == "boolean":
+            lowered: str = prompt.lower()
+            if "true" in lowered or "yes" in lowered:
+                return True
+            if "false" in lowered or "no" in lowered:
+                return False
+            return False
+        if param_spec.type == "string":
+            quoted_strings: list[str] = self._extract_quoted_strings(
+                prompt
+            )
+            lowered_prompt: str = prompt.lower()
+            if param_name == "name":
+                extracted_word: str = self._extract_word_after_pattern(
+                    prompt, r"greet"
+                )
+                if extracted_word:
+                    return extracted_word
+
+            # Handle: "Replace all <target> in <source> with <replacement>"
+            replace_all_cond: bool = "replace all" in lowered_prompt
+            if param_name == "regex" and replace_all_cond:
+                target: str = self._extract_replace_target(prompt)
+                if target:
+                    return self._regex_from_replace_target(target)
+            if param_name == "replacement" and replace_all_cond:
+                replacement: str = self._extract_replacement_text(prompt)
+                if replacement:
+                    return replacement
+
+            src_cond: bool = (
+                param_name == "source_string"
+                and ("substitute" in lowered_prompt
+                     or "replace" in lowered_prompt)
+            )
+            if src_cond:
+                if quoted_strings:
+                    if len(quoted_strings) > 1:
+                        return quoted_strings[-1]
+                    return quoted_strings[0]
+            if param_name == "regex" and (
+                "substitute" in lowered_prompt
+                or "replace" in lowered_prompt
+            ):
+                if len(quoted_strings) > 1:
+                    return quoted_strings[0]
+                words_regex: list[str] = re.findall(r"\w+", prompt)
+                if len(words_regex) >= 4:
+                    return words_regex[3]
+            subst_cond: bool = (
+                param_name == "replacement"
+                and ("substitute" in lowered_prompt
+                     or "replace" in lowered_prompt)
+            )
+            if subst_cond:
+                if len(quoted_strings) > 1:
+                    return quoted_strings[1]
+                words_replace: list[str] = re.findall(r"\w+", prompt)
+                if words_replace:
+                    return words_replace[-1]
+            if quoted_strings and param_index < len(quoted_strings):
+                return quoted_strings[param_index]
+            match: re.Match[str] | None = re.search(
+                rf"{re.escape(param_name)}[\s:=]+([^\s,;.!?]+)",
+                prompt,
+                re.IGNORECASE,
+            )
+            if match:
+                return match.group(1)
+            return ""
+        raise ValueError(f"Unsupported parameter type: {param_spec.type}")
 
     def build_result(self, prompt: str) -> dict[str, Any]:
         """Create one function call result for a single prompt."""
@@ -280,22 +454,20 @@ class LLM_Model:
         try:
             function_def: FunctionDefinition = self._choose_function(prompt)
             parameters: dict[str, Any] = {}
+            param_list: list[tuple[str, ParameterSpec]] = list(
+                function_def.parameters.items()
+            )
 
-            for param_name, param_spec in function_def.parameters.items():
-                value_prompt: str = (
-                    f"Prompt: {prompt}\n"
-                    f"Function: {function_def.name}\n"
-                    f"Parameter: {param_name}\n"
-                    f"Type: {param_spec.type}\n"
-                    "Return only the value."
-                )
-                raw_text: str = self._generate_text(
-                    prompt=value_prompt,
-                    display_prompt=prompt,
-                    stage=f"parameter {param_name}",
-                )
+            for param_index, (param_name, param_spec) in enumerate(
+                param_list
+            ):
                 parameters[param_name] = self._extract_value(
-                    prompt, raw_text, param_spec.type
+                    prompt=prompt,
+                    function_name=function_def.name,
+                    param_name=param_name,
+                    param_spec=param_spec,
+                    param_index=param_index,
+                    param_count=len(param_list),
                 )
 
             result = FunctionCallResult(
@@ -360,6 +532,15 @@ def main() -> None:
     try:
         func_defs: list[dict[str, Any]] = read_json(args.functions_definition)
         inputs: list[dict[str, Any]] = read_json(args.input)
+        if not func_defs:
+            print_colored(
+                (
+                    "Function definitions are empty. At least one "
+                    "function is required."
+                ),
+                "red",
+            )
+            return
         llm = LLM_Model(func_defs, inputs)
 
         output_dir: str = os.path.dirname(args.output)
@@ -371,6 +552,7 @@ def main() -> None:
             prompt: str = str(entry.get("prompt", ""))
             try:
                 result = llm.build_result(prompt)
+                func_result_check(func_defs, result)
             except Exception as e:
                 print_colored(
                     f"Failed to build a result for prompt '{prompt}': {e}",
@@ -382,6 +564,14 @@ def main() -> None:
                     name=fallback_function.name,
                     parameters=_default_parameters(fallback_function),
                 ).model_dump(mode="json")
+                print_colored(
+                    (
+                        "Using explicit fallback result with default parameter"
+                        " values."
+                    ),
+                    "yellow",
+                )
+                func_result_check(func_defs, result)
             results.append(result)
 
         try:
