@@ -218,20 +218,44 @@ class LLM_Model:
 
     def _function_prompt(self, prompt: str) -> str:
         """Build the instruction used to select the function name."""
-        lines: list[str] = ["Available functions:"]
+        lines: list[str] = [
+            "You are a function router.",
+            "Return exactly one function name from the list.",
+            "Do not explain.",
+            "",
+            "Routing hints:",
+            "- square root, sqrt -> fn_get_square_root",
+            "- replace, substitute, regex pattern matching ->"
+            " fn_substitute_string_with_regex",
+            "- reverse string -> fn_reverse_string",
+            "- greet someone -> fn_greet",
+            "- add/sum/plus/total -> fn_add_numbers",
+            "- multiply/product/times -> fn_multiply_numbers",
+            "- divide/quotient -> fn_divide_numbers",
+            "",
+            "Few-shot examples:",
+            "Prompt: What is the square root of 16?",
+            "Function name: fn_get_square_root",
+            "Prompt: Replace all vowels in 'Programming is fun' with *",
+            "Function name: fn_substitute_string_with_regex",
+            "Prompt: Reverse the string 'hello'",
+            "Function name: fn_reverse_string",
+            "",
+            "Available functions:",
+        ]
         for func in self.funcdef:
             lines.append(f"- {func.name}: {func.description}")
-        lines.append(f"Prompt: {prompt}")
-        lines.append("Function name:")
-        # if fn_not_implemented exist
-        # tell the AI to use them when appropriate
+
         if any(func.name == "fn_not_implemented" for func in self.funcdef):
             lines.append(
                 (
-                    "choose fn_not_implemented if the prompt does not match"
-                    "any function or is not a valid request"
+                    "If prompt does not match any function, choose "
+                    "fn_not_implemented."
                 )
             )
+
+        lines.append(f"Prompt: {prompt}")
+        lines.append("Function name:")
         return "\n".join(lines)
 
     def _generate_text(
@@ -283,6 +307,7 @@ class LLM_Model:
             function_names,
             render_step=render_step,
         )
+
         for func in self.funcdef:
             if func.name == chosen_name:
                 return func
