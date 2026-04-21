@@ -13,6 +13,8 @@ clean:
 	rm -rf __pycache__ .mypy_cache src/__pycache__
 	rm -rf data/output/
 	rm -rf .venv
+	rm -rf llm_sdk/__pycache__
+	rm -rf llm_sdk/llm_sdk/__pycache__
 
 lint:
 	uv run flake8 . --exclude=.venv,__init__.py
