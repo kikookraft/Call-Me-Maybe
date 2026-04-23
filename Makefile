@@ -1,5 +1,10 @@
 .PHONY: install run debug clean lint lint-strict
 
+export UV_CACHE_DIR=/goinfre/$(USER)/cmm_cache
+export UV_PROJECT_ENVIRONMENT=/goinfre/$(USER)/cmm_venv
+export HF_HOME=/goinfre/$(USER)/hf_cache
+unexport VIRTUAL_ENV
+
 run: install
 	uv run python -m src
 
@@ -12,7 +17,8 @@ debug:
 clean:
 	rm -rf __pycache__ .mypy_cache src/__pycache__
 	rm -rf data/output/
-	rm -rf .venv
+	rm -rf $(UV_PROJECT_ENVIRONMENT)
+	rm -rf $(UV_CACHE_DIR)
 	rm -rf llm_sdk/__pycache__
 	rm -rf llm_sdk/llm_sdk/__pycache__
 
