@@ -1,6 +1,6 @@
 [project]
 name = "call_me_maybe"
-version = "0.1.0"
+version = "1.0.0"
 description = "Introduction to function calling in LLMs"
 readme = "README.md"
 requires-python = ">=3.10"
