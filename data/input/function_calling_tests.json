@@ -31,5 +31,20 @@
   },
   {
     "prompt": "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'"
+  },
+  {
+    "prompt": "Substitute the word 'blue' with 'red' in 'The sky is blue and the ocean is blue'"
+  },
+  {
+    "prompt": "Calculate the factorial of 5"
+  },
+  {
+    "prompt": "Calculate the factorial of 10"
+  },
+  {
+    "prompt": "What is the capital of France?"
+  },
+  {
+    "prompt": "Find the greatest common divisor of 56 and 98"
   }
 ]
