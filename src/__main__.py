@@ -61,15 +61,25 @@ class TokenChoiceDecoder:
                 prompt_ids + generated_ids
             )
 
+            import heapq
+
             valid_token_ids: list[int] = []
-            for token_id in range(self._vocab_size):
+            # sort logits output and pick the first valid one to optimize
+            # Extract top 1024 tokens to avoid sorting/evaluating 150k elements
+            top_k_indices = heapq.nlargest(
+                1024, range(self._vocab_size), key=logits.__getitem__
+            )
+
+            for token_id in top_k_indices:
                 token_text: str = self._token_text(token_id)
                 if not token_text:
                     continue
                 candidate_text: str = generated_text + token_text
-                if any(option.startswith(candidate_text)
-                       for option in options):
+                if any(
+                    option.startswith(candidate_text) for option in options
+                ):
                     valid_token_ids.append(token_id)
+                    break
 
             if not valid_token_ids:
                 break
@@ -110,14 +120,24 @@ class TokenChoiceDecoder:
                 prompt_ids + generated_ids
             )
 
+            import heapq
+
             valid_token_ids: list[int] = []
-            for token_id in range(self._vocab_size):
+
+            # Extract top 1024 tokens to avoid sorting/evaluating 150k elements
+            top_k_indices = heapq.nlargest(
+                1024, range(self._vocab_size), key=logits.__getitem__
+            )
+
+            for token_id in top_k_indices:
                 token_text: str = self._token_text(token_id)
                 if not token_text:
                     continue
                 candidate_text: str = generated_text + token_text
                 if is_valid_prefix(candidate_text):
                     valid_token_ids.append(token_id)
+                    break
+                    break
 
             if not valid_token_ids:
                 break
